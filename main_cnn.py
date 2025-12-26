@@ -437,14 +437,24 @@ def run_predict(path):
                     break
 
     res_list = []
+    #if DEBUG_MODE:
+    #    print(f"\n{'='*40}")
+    #    print(f"{'Char':<4} | {'Prob':<8} | {'Select'}")
+
     if DEBUG_MODE:
-        print(f"\n{'='*40}")
-        print(f"{'Char':<4} | {'Prob':<8} | {'Select'}")
+        print(f"\n{'='*65}")
+        print(f"{'索引':<4} | {'字符':<4} | {'分值':<15} | 状态")
+        print("-" * 65)
+        for i, p in enumerate(probs):
+            status = "✅ [选中]" if p > THRESHOLD else "   [排除]"
+            print(f"{i:<4} | {path[i]:<4} | {p:.10f} | {status}")
+        print(f"{'='*65}\n")
+
     
     for i, is_sel in enumerate(selected_mask):
-        p = probs[i]
-        if DEBUG_MODE and p > 0.05:
-            print(f"{path[i]:<4} | {p:.4f}   | {'✅' if is_sel else ''}")
+        #p = probs[i]
+        #if DEBUG_MODE and p > 0.05:
+        #    print(f"{path[i]:<4} | {p:.4f}   | {'✅' if is_sel else ''}")
         if is_sel:
             res_list.append(path[i])
 
@@ -480,4 +490,5 @@ if __name__ == "__main__":
         else:
             run_predict(sys.argv[1])
     else:
+
         run_train(incremental=False)
