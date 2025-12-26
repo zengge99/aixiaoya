@@ -11,7 +11,7 @@ import re
 import random
 import numpy as np
 import glob
-import string  # 引入标准库以构建英文字符集
+import string
 
 # --- 全局核心配置 ---
 NUM_THREADS = 4
