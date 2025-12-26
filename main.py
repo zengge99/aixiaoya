@@ -175,7 +175,7 @@ class MovieDataset(Dataset):
                 skipped_count += 1
 
         if skipped_count > 0:
-            print(f"跳过了 {skipped_count} 条无法匹配标签的数据。")
+            print(f"Dataset Info: 跳过了 {skipped_count} 条无法匹配标签的数据。")
 
     def __len__(self): return len(self.samples)
     def __getitem__(self, idx): return self.samples[idx]
@@ -192,14 +192,15 @@ def validate_one_epoch(model, loader, criterion):
     return v_loss / len(loader) if len(loader) > 0 else 0
 
 # --- 训练逻辑 ---
-def run_train():
+def run_train(incremental=False):
     # 设置全局种子
     set_seed(SEED)
-    print(f"随机种子已固定为: {SEED}")
+    mode_str = "【增量训练模式】" if incremental else "【全量训练模式】"
+    print(f"{mode_str} 随机种子已固定为: {SEED}")
 
     # 1. 搜索所有匹配的文件
     data_files = glob.glob(DATA_FILE_PATTERN)
-    # 排序以保证每次运行读取顺序一致
+    # 排序以保证每次运行读取顺序一致，确保 index 0 总是同一个文件
     data_files.sort()
     
     if not data_files:
@@ -210,39 +211,55 @@ def run_train():
     all_train_lines = []
     all_val_lines = []
     
-    # 2. 遍历每个文件，分别进行 90% / 10% 切分
+    # 2. 遍历每个文件
     # 使用独立的 Random 实例进行 shuffle，不影响全局状态
     rng = random.Random(SEED)
     
-    for f_path in data_files:
+    for i, f_path in enumerate(data_files):
         with open(f_path, 'r', encoding='utf-8') as f:
             lines = [l.strip() for l in f.readlines() if '#' in l.strip()]
         
         # 确定性打乱
         rng.shuffle(lines)
         
-        total = len(lines)
-        if total == 0: continue
+        total_raw = len(lines)
+        if total_raw == 0: continue
+        
+        # --- 增量训练核心逻辑 ---
+        if incremental and i == 0:
+            # 如果是增量模式，且是第一个文件（旧数据），只保留 10%
+            keep_count = int(total_raw * 0.1)
+            # 至少保留1条，避免空列表
+            if keep_count == 0 and total_raw > 0: keep_count = 1
             
-        train_count = int(total * 0.9)
-        # 确保至少有数据，如果数据量太少(例如1条)，全归训练集
-        if train_count == 0 and total > 0: train_count = total
+            lines = lines[:keep_count]
+            print(f"  └─ [Old Data] {os.path.basename(f_path)}: 仅取 10% ({keep_count}/{total_raw}条)")
+        else:
+            # 其他情况（全量模式 或 增量模式下的新文件），保留 100%
+            print(f"  └─ [New Data] {os.path.basename(f_path)}: 读取全量 ({total_raw}条)")
+
+        # 3. 对筛选后的数据进行 训练/验证 切分 (90% / 10%)
+        # 即使是 Old Data，我们也切分出验证集，以保证验证 Loss 的有效性
+        current_total = len(lines)
+        train_count = int(current_total * 0.9)
+        if train_count == 0 and current_total > 0: train_count = current_total
         
         train_part = lines[:train_count]
         val_part = lines[train_count:]
         
         all_train_lines.extend(train_part)
         all_val_lines.extend(val_part)
-        print(f"  └─ {os.path.basename(f_path)}: 训练 {len(train_part)} 条 / 验证 {len(val_part)} 条")
 
-    print(f"总计: 训练集 {len(all_train_lines)} 条 | 验证集 {len(all_val_lines)} 条")
+    print(f"\n数据集准备完毕: 训练集 {len(all_train_lines)} 条 | 验证集 {len(all_val_lines)} 条")
 
-    # 3. 构建或加载词表 (基于所有数据)
+    # 4. 构建或加载词表 (基于所有数据)
     all_lines_for_vocab = all_train_lines + all_val_lines
     if os.path.exists(VOCAB_PATH):
         with open(VOCAB_PATH, 'rb') as f: char_to_idx = pickle.load(f)
         print("已加载现有词表。")
     else:
+        # 注意：如果是增量训练且没有旧词表，可能会漏掉旧数据里被丢弃的那90%字符
+        # 但通常增量训练意味着已经有模型和词表了。
         raw_paths = [l.split('#')[0] for l in all_lines_for_vocab]
         all_chars = set("".join(raw_paths))
         char_to_idx = {c: i+2 for i, c in enumerate(sorted(list(all_chars)))}
@@ -250,16 +267,18 @@ def run_train():
         with open(VOCAB_PATH, 'wb') as f: pickle.dump(char_to_idx, f)
         print(f"已创建新词表，包含 {len(char_to_idx)} 个字符。")
 
-    # 4. 创建 Dataset 和 DataLoader
-    # 注意：这里直接传入切分好的 list，不需要再用 random_split
+    # 5. 创建 Dataset 和 DataLoader
     train_ds = MovieDataset(all_train_lines, char_to_idx)
     val_ds = MovieDataset(all_val_lines, char_to_idx)
 
     if len(train_ds) < 1:
         print("有效样本数量不足，无法进行训练。"); return
 
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
-    # 验证集不需要 shuffle，batch_size 可以大一点或者保持一致
+    # 这里使用了 generator 来确保 shuffle 的完全可复现性
+    g = torch.Generator()
+    g.manual_seed(SEED)
+    
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, generator=g)
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False)
 
     model = FilmExtractor(len(char_to_idx))
@@ -268,6 +287,7 @@ def run_train():
     
     best_val_loss = float('inf')
 
+    # 加载模型逻辑
     if os.path.exists(MODEL_PATH):
         print(f"检测到现有模型，加载权重以 LR={LR} 继续微调...")
         model.load_state_dict(torch.load(MODEL_PATH, map_location='cpu'))
@@ -292,7 +312,6 @@ def run_train():
                 optimizer.step()
                 pbar.set_postfix(loss=f"{loss.item():.4f}")
             
-            # 只有当有验证集数据时才验证
             if len(val_ds) > 0:
                 avg_val_loss = validate_one_epoch(model, val_loader, criterion)
                 
@@ -303,7 +322,6 @@ def run_train():
                 else:
                     print(f" ⏳ 验证集 Loss: {avg_val_loss:.4f} (未提升，最佳: {best_val_loss:.4f})")
             else:
-                # 如果没有验证集（比如数据极少），则每一轮都保存
                 torch.save(model.state_dict(), MODEL_PATH)
                 print(" ⚠️ 无验证集，模型已保存。")
                 
@@ -352,18 +370,16 @@ def run_predict(path):
     clean_result = re.sub(r'\s+', ' ', clean_result)
     clean_result = clean_result.strip("/()# “”.-")
 
-    # 1. 验证连续性：对清洗后的结果进行正则转义 (处理名字里可能有 + ? 等特殊符号的情况)
+    # 1. 验证连续性
     if clean_result:
         escaped_clean = re.escape(clean_result)
-        # 允许原始路径中存在分隔符或括号，但核心字符顺序必须匹配
         verify_pattern = escaped_clean.replace(r'\ ', r'[._\s\-\(\)\[\]]*')
         if not re.search(verify_pattern, path, re.IGNORECASE):
             if DEBUG_MODE:
                 print(f"[验证失败] '{clean_result}' 无法在原路径中连续匹配，判定为无效提取。")
             clean_result = ""
 
-    # 2. 混合模式：调用 JS 移植逻辑进行季数修复
-    # 只有当 clean_result 有效时才进行，避免空字符串去匹配出 "第1季"
+    # 2. 混合模式修复
     if clean_result:
         clean_result = TextUtils.fix_name(path, clean_result) 
 
@@ -375,7 +391,14 @@ def run_predict(path):
 
 # --- 入口控制 ---
 if __name__ == "__main__":
+    # 如果有参数
     if len(sys.argv) > 1:
-        run_predict(sys.argv[1])
+        # 检查是否为增量训练标记
+        if sys.argv[1] == '--inc':
+            run_train(incremental=True)
+        else:
+            # 否则视为预测路径
+            run_predict(sys.argv[1])
     else:
-        run_train()
+        # 默认全量训练
+        run_train(incremental=False)
