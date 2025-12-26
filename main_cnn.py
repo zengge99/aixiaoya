@@ -404,6 +404,10 @@ def run_predict(path):
     if not os.path.exists(MODEL_PATH) or not os.path.exists(VOCAB_PATH):
         print("错误: 找不到模型或词表文件。请先运行训练。"); return
 
+    if '#' in path:
+        print(path)
+        return
+
     with open(VOCAB_PATH, 'rb') as f: char_to_idx = pickle.load(f)
     model = Extractor(len(char_to_idx), embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM)
     model.load_state_dict(torch.load(MODEL_PATH, map_location='cpu'))
@@ -437,9 +441,6 @@ def run_predict(path):
                     break
 
     res_list = []
-    #if DEBUG_MODE:
-    #    print(f"\n{'='*40}")
-    #    print(f"{'Char':<4} | {'Prob':<8} | {'Select'}")
 
     if DEBUG_MODE:
         print(f"\n{'='*65}")
@@ -452,9 +453,6 @@ def run_predict(path):
 
     
     for i, is_sel in enumerate(selected_mask):
-        #p = probs[i]
-        #if DEBUG_MODE and p > 0.05:
-        #    print(f"{path[i]:<4} | {p:.4f}   | {'✅' if is_sel else ''}")
         if is_sel:
             res_list.append(path[i])
 
@@ -478,17 +476,38 @@ def run_predict(path):
 
     if DEBUG_MODE: 
         print(f"提取原文: {raw_result}")
-        print(f"最终结果: {clean_result}\n")
+        print(f"最终结果: {path}#{clean_result}")
     else: 
-        print(clean_result)
+        print(f"{path}#{clean_result}")
 
 # --- 入口控制 ---
 if __name__ == "__main__":
     if len(sys.argv) > 1:
-        if sys.argv[1] == '--inc':
-            run_train(incremental=True)
-        else:
-            run_predict(sys.argv[1])
-    else:
+        input_arg = sys.argv[1]
 
+        if input_arg == '--inc':
+            # 模式 1: 增量训练
+            run_train(incremental=True)
+        
+        elif os.path.exists(input_arg) and os.path.isfile(input_arg):
+            # 模式 2: 批量预测 (输入是文件路径)
+            try:
+                print(f"📂 检测到输入为文件: [{input_arg}]，开始批量处理...")
+                with open(input_arg, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                
+                total_lines = len(lines)
+                for idx, line in enumerate(lines):
+                    line = line.strip()
+                    if not line: continue
+                    run_predict(line)
+                    
+            except Exception as e:
+                print(f"❌ 读取文件失败: {e}")
+        
+        else:
+            # 模式 3: 单条字符串预测
+            run_predict(input_arg)
+    else:
+        # 模式 4: 默认全量训练
         run_train(incremental=False)
