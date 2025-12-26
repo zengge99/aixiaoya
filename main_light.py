@@ -402,7 +402,7 @@ def run_predict(path):
         print("错误: 找不到模型或词表文件。请先运行训练。"); return
 
     with open(VOCAB_PATH, 'rb') as f: char_to_idx = pickle.load(f)
-    model = AdvancedFilmExtractor(len(char_to_idx), embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM)
+    model = FastCNNExtractor(len(char_to_idx), embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM)
     model.load_state_dict(torch.load(MODEL_PATH, map_location='cpu'))
     model.eval()
 
