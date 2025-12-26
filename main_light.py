@@ -346,7 +346,7 @@ def run_train(incremental=False):
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False)
 
     # 初始化新模型
-    model = AdvancedFilmExtractor(len(char_to_idx), embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM)
+    model = FastCNNExtractor(len(char_to_idx), embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM)
     
     # 🔥 关键修改：使用 Focal Loss
     criterion = FocalLoss(alpha=0.75, gamma=2)
