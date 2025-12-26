@@ -9,7 +9,7 @@ import os
 import re
 import random
 import numpy as np
-import glob  # 引入glob用于匹配多个文件
+import glob
 
 # --- 全局核心配置 ---
 NUM_THREADS = 4
@@ -48,9 +48,6 @@ class TextUtils:
 
     @staticmethod
     def number2text(text):
-        """
-        将数字字符串转换为中文数字
-        """
         if not text: return text
         text = text.lstrip('0')
         if not text: return "零" 
@@ -71,9 +68,6 @@ class TextUtils:
 
     @staticmethod
     def fix_name(path, ai_result):
-        """
-        AI 结果后处理：修正或补全季数信息
-        """
         replace_patterns = [
             r'Season\s*(\d{1,2})',              
             r'SE(\d{1,2})',                     
@@ -91,7 +85,6 @@ class TextUtils:
             cn_num = TextUtils.number2text(num)
             return f" 第{cn_num}季 " 
 
-        # 1. 尝试在 AI 结果内部直接替换
         for pattern in replace_patterns:
             if re.search(pattern, processed_result, re.IGNORECASE):
                 processed_result = re.sub(pattern, replace_func, processed_result, flags=re.IGNORECASE)
@@ -101,7 +94,6 @@ class TextUtils:
         if replaced_flag:
             return processed_result
 
-        # 2. (兜底) 从原路径找季数追加
         path_search_patterns = [
             r'Season\s*(\d{1,2})',
             r'SE(\d{1,2})',
@@ -211,55 +203,59 @@ def run_train(incremental=False):
     all_train_lines = []
     all_val_lines = []
     
-    # 2. 遍历每个文件
     # 使用独立的 Random 实例进行 shuffle，不影响全局状态
     rng = random.Random(SEED)
     
+    # 2. 遍历每个文件
     for i, f_path in enumerate(data_files):
         with open(f_path, 'r', encoding='utf-8') as f:
             lines = [l.strip() for l in f.readlines() if '#' in l.strip()]
         
-        # 确定性打乱
+        # 步骤A: 确定性打乱
         rng.shuffle(lines)
-        
         total_raw = len(lines)
         if total_raw == 0: continue
         
-        # --- 增量训练核心逻辑 ---
+        # 步骤B: 先进行 训练/验证 切分
+        # 无论是否增量，永远固定前90%为训练池，后10%为验证池。
+        # 这样可以保证验证集永远纯净，不会因为增量裁切导致训练数据越界。
+        split_idx = int(total_raw * 0.9)
+        if split_idx == 0 and total_raw > 0: split_idx = total_raw # 极少数据保护
+        
+        file_train_lines = lines[:split_idx]
+        file_val_lines = lines[split_idx:]
+        
+        # 步骤C: 处理增量逻辑（仅在切分后的各自池子内进行保留/丢弃）
         if incremental and i == 0:
-            # 如果是增量模式，且是第一个文件（旧数据），只保留 2%
-            keep_count = int(total_raw * 0.02)
-            # 至少保留1条，避免空列表
-            if keep_count == 0 and total_raw > 0: keep_count = 1
+            # 旧文件：仅保留 2% 的训练数据，以及 2% 的验证数据 (保持分布一致，且节省验证时间)
+            keep_train_count = int(len(file_train_lines) * 0.02)
+            keep_val_count = int(len(file_val_lines) * 0.02)
             
-            lines = lines[:keep_count]
-            print(f"  └─ [Old Data] {os.path.basename(f_path)}: 仅取 10% ({keep_count}/{total_raw}条)")
+            # 最小保留保护
+            if keep_train_count == 0 and len(file_train_lines) > 0: keep_train_count = 1
+            if keep_val_count == 0 and len(file_val_lines) > 0: keep_val_count = 1
+            
+            final_train = file_train_lines[:keep_train_count]
+            final_val = file_val_lines[:keep_val_count]
+            
+            print(f"  └─ [Old Data] {os.path.basename(f_path)}: 采样保留 训练{len(final_train)}条 / 验证{len(final_val)}条")
         else:
-            # 其他情况（全量模式 或 增量模式下的新文件），保留 100%
-            print(f"  └─ [New Data] {os.path.basename(f_path)}: 读取全量 ({total_raw}条)")
+            # 新文件或全量模式：保留切分后的所有数据
+            final_train = file_train_lines
+            final_val = file_val_lines
+            print(f"  └─ [New Data] {os.path.basename(f_path)}: 全量读取 训练{len(final_train)}条 / 验证{len(final_val)}条")
 
-        # 3. 对筛选后的数据进行 训练/验证 切分 (90% / 10%)
-        # 即使是 Old Data，我们也切分出验证集，以保证验证 Loss 的有效性
-        current_total = len(lines)
-        train_count = int(current_total * 0.9)
-        if train_count == 0 and current_total > 0: train_count = current_total
-        
-        train_part = lines[:train_count]
-        val_part = lines[train_count:]
-        
-        all_train_lines.extend(train_part)
-        all_val_lines.extend(val_part)
+        all_train_lines.extend(final_train)
+        all_val_lines.extend(final_val)
 
     print(f"\n数据集准备完毕: 训练集 {len(all_train_lines)} 条 | 验证集 {len(all_val_lines)} 条")
 
-    # 4. 构建或加载词表 (基于所有数据)
+    # 4. 构建或加载词表
     all_lines_for_vocab = all_train_lines + all_val_lines
     if os.path.exists(VOCAB_PATH):
         with open(VOCAB_PATH, 'rb') as f: char_to_idx = pickle.load(f)
         print("已加载现有词表。")
     else:
-        # 注意：如果是增量训练且没有旧词表，可能会漏掉旧数据里被丢弃的那90%字符
-        # 但通常增量训练意味着已经有模型和词表了。
         raw_paths = [l.split('#')[0] for l in all_lines_for_vocab]
         all_chars = set("".join(raw_paths))
         char_to_idx = {c: i+2 for i, c in enumerate(sorted(list(all_chars)))}
@@ -274,7 +270,7 @@ def run_train(incremental=False):
     if len(train_ds) < 1:
         print("有效样本数量不足，无法进行训练。"); return
 
-    # 这里使用了 generator 来确保 shuffle 的完全可复现性
+    # 【核心配置】使用 Generator 确保 shuffle 的完全可复现性
     g = torch.Generator()
     g.manual_seed(SEED)
     
@@ -391,14 +387,10 @@ def run_predict(path):
 
 # --- 入口控制 ---
 if __name__ == "__main__":
-    # 如果有参数
     if len(sys.argv) > 1:
-        # 检查是否为增量训练标记
         if sys.argv[1] == '--inc':
             run_train(incremental=True)
         else:
-            # 否则视为预测路径
             run_predict(sys.argv[1])
     else:
-        # 默认全量训练
         run_train(incremental=False)
