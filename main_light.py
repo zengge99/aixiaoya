@@ -15,12 +15,12 @@ import string  # 引入标准库以构建英文字符集
 
 # --- 全局核心配置 ---
 NUM_THREADS = 4
-BATCH_SIZE = 64
+BATCH_SIZE = 128
 LR = 1e-4            # 学习率
 EPOCHS = 50          # 训练轮数
 MAX_LEN = 150        # 最大序列长度
-EMBED_DIM = 128      # 向量维度 (增大)
-HIDDEN_DIM = 256     # 隐藏层维度 (增大，适配英文长依赖)
+EMBED_DIM = 64      # 向量维度 (增大)
+HIDDEN_DIM = 128     # 隐藏层维度 (增大，适配英文长依赖)
 
 MODEL_PATH = "movie_model.pth"
 VOCAB_PATH = "vocab.pkl"
