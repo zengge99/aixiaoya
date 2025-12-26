@@ -227,8 +227,8 @@ def run_train(incremental=False):
         
         # --- 增量训练核心逻辑 ---
         if incremental and i == 0:
-            # 如果是增量模式，且是第一个文件（旧数据），只保留 10%
-            keep_count = int(total_raw * 0.1)
+            # 如果是增量模式，且是第一个文件（旧数据），只保留 2%
+            keep_count = int(total_raw * 0.02)
             # 至少保留1条，避免空列表
             if keep_count == 0 and total_raw > 0: keep_count = 1
             
