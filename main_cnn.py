@@ -118,7 +118,7 @@ class TextUtils:
         return processed_result
 
 # --- 🧠 优化后的模型结构 (CNN + BiGRU + Attention) ---
-class AdvancedFilmExtractor(nn.Module):
+class Extractor(nn.Module):
     def __init__(self, vocab_size, embed_dim=128, hidden_dim=256):
         super().__init__()
         
@@ -349,7 +349,7 @@ def run_train(incremental=False):
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False)
 
     # 初始化新模型
-    model = AdvancedFilmExtractor(len(char_to_idx), embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM)
+    model = Extractor(len(char_to_idx), embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM)
     
     # 🔥 关键修改：使用 Focal Loss
     criterion = FocalLoss(alpha=0.75, gamma=2)
@@ -405,7 +405,7 @@ def run_predict(path):
         print("错误: 找不到模型或词表文件。请先运行训练。"); return
 
     with open(VOCAB_PATH, 'rb') as f: char_to_idx = pickle.load(f)
-    model = AdvancedFilmExtractor(len(char_to_idx), embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM)
+    model = Extractor(len(char_to_idx), embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM)
     model.load_state_dict(torch.load(MODEL_PATH, map_location='cpu'))
     model.eval()
 
