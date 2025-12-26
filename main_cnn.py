@@ -15,7 +15,7 @@ import string  # 引入标准库以构建英文字符集
 
 # --- 全局核心配置 ---
 NUM_THREADS = 4
-BATCH_SIZE = 64
+BATCH_SIZE = 128
 LR = 1e-4            # 学习率
 EPOCHS = 50          # 训练轮数
 MAX_LEN = 150        # 最大序列长度
