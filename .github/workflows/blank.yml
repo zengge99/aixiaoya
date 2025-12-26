@@ -1,8 +1,6 @@
 name: Auto Build to DockerHub
 
 on:
-  push:
-    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
