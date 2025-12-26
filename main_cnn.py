@@ -117,7 +117,7 @@ class TextUtils:
         
         return processed_result
 
-# --- 🧠 优化后的模型结构 (CNN + BiGRU + Attention) ---
+# --- 模型结构 (CNN + BiGRU + Attention) ---
 class Extractor(nn.Module):
     def __init__(self, vocab_size, embed_dim=128, hidden_dim=256):
         super().__init__()
@@ -175,7 +175,7 @@ class Extractor(nn.Module):
         
         return self.fc(combined).squeeze(-1)
 
-# --- ⚖️ Focal Loss (解决样本不平衡) ---
+# --- Focal Loss ---
 class FocalLoss(nn.Module):
     def __init__(self, alpha=0.75, gamma=2, reduction='mean'):
         super(FocalLoss, self).__init__()
@@ -196,7 +196,7 @@ class FocalLoss(nn.Module):
         elif self.reduction == "sum": return loss.sum()
         return loss
 
-# --- 📂 数据集定义 ---
+# --- 数据集定义 ---
 class MovieDataset(Dataset):
     def __init__(self, lines, char_to_idx, max_len=MAX_LEN):
         self.samples = []
@@ -238,7 +238,7 @@ class MovieDataset(Dataset):
     def __len__(self): return len(self.samples)
     def __getitem__(self, idx): return self.samples[idx]
 
-# --- 🛠️ 辅助函数：验证集计算 ---
+# --- 辅助函数：验证集计算 ---
 def validate_one_epoch(model, loader, criterion):
     model.eval()
     v_loss = 0
@@ -322,7 +322,7 @@ def run_train(incremental=False):
         with open(VOCAB_PATH, 'rb') as f: char_to_idx = pickle.load(f)
         print("已加载现有词表。")
     else:
-        # 🔥 关键修改：强行注入基础 ASCII 字符，防止英文词表缺失
+        # 强行注入基础 ASCII 字符，防止英文词表缺失
         raw_paths = [l.split('#')[0] for l in all_train_lines + all_val_lines]
         all_chars = set("".join(raw_paths).lower())
         
@@ -351,7 +351,7 @@ def run_train(incremental=False):
     # 初始化新模型
     model = Extractor(len(char_to_idx), embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM)
     
-    # 🔥 关键修改：使用 Focal Loss
+    # 使用 Focal Loss
     criterion = FocalLoss(alpha=0.75, gamma=2)
     optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-5) # 增加 weight_decay 防止过拟合
     
