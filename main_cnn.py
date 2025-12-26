@@ -368,7 +368,7 @@ def run_train(incremental=False):
             best_val_loss = initial_val_loss 
             print(f"当前模型基准 Loss: {best_val_loss:.4f}")
     else:
-        print("🆕 未检测到模型，将从头开始训练。")
+        print("未检测到模型，将从头开始训练。")
     
     try:
         for epoch in range(EPOCHS):
@@ -492,7 +492,7 @@ if __name__ == "__main__":
         elif os.path.exists(input_arg) and os.path.isfile(input_arg):
             # 模式 2: 批量预测 (输入是文件路径)
             try:
-                print(f"📂 检测到输入为文件: [{input_arg}]，开始批量处理...")
+                print(f"检测到输入为文件: [{input_arg}]，开始批量处理...")
                 with open(input_arg, 'r', encoding='utf-8') as f:
                     lines = f.readlines()
                 
@@ -503,7 +503,7 @@ if __name__ == "__main__":
                     run_predict(line)
                     
             except Exception as e:
-                print(f"❌ 读取文件失败: {e}")
+                print(f"读取文件失败: {e}")
         
         else:
             # 模式 3: 单条字符串预测
