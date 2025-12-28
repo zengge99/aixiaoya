@@ -198,6 +198,24 @@ class FocalLoss(nn.Module):
 
 # --- 数据集定义 ---
 class MovieDataset(Dataset):
+    PREFIX_LIST = [
+        'Download', 'Downloads', 'Movies', 'TV_Shows', 'Media', 'Video', 
+        'Temp', 'Backup', 'Data', 'New_Folder', 'Private',
+        '下载', '迅雷下载', '百度网盘', '我的下载', '传输文件', '接收文件',
+        '电影', '电视剧', '视频', '影视', '剧集', '动漫', '动画', 
+        '综艺', '纪录片', '合集', '国产剧', '美剧', '日剧', '韩剧',
+        '新建文件夹', '备份', '临时', '资料', '桌面', '我的文档', 
+        '收藏', '待看', '已看', '整理', '回收站'
+    ]
+    
+    SUFFIX_LIST = [
+        'mp4', 'mkv', 'avi', 'rmvb', 'wmv', 'mov', 'flv', 'iso', 'torrent',
+        '1080p', '720p', '2160p', '4K', 'x264', 'x265', 'HEVC', 
+        'HDR', 'BluRay', 'BDrip', 'WebDL', 'HDTV', 'AAC', 'DTS', 'Atmos',
+        '高清', '蓝光', '字幕', '福利', '完结', '未删减', '加长版',
+        '中字', '双语', '国语', '特效字幕', '含花絮', '修正版',
+        'Backup', 'Copy', 'Temp', '副本'
+    ]
     def __init__(self, lines, char_to_idx, max_len=MAX_LEN, training=True):
         self.samples = []
         self.char_to_idx = char_to_idx
@@ -235,40 +253,13 @@ class MovieDataset(Dataset):
             # 50% 概率加前缀（模拟目录），50% 概率加后缀（模拟文件属性）
             if random.random() < 0.5:
                 # --- 情况 1：加前缀 (模拟父级目录) ---
-                prefix_list = [
-                    # 常见英文目录
-                    'Download', 'Downloads', 'Movies', 'TV_Shows', 'Media', 'Video', 
-                    'Temp', 'Backup', 'Data', 'New_Folder', 'Private',
-                    
-                    # 常见中文目录
-                    '下载', '迅雷下载', '百度网盘', '我的下载', '传输文件', '接收文件',
-                    '电影', '电视剧', '视频', '影视', '剧集', '动漫', '动画', 
-                    '综艺', '纪录片', '合集', '国产剧', '美剧', '日剧', '韩剧',
-                    '新建文件夹', '备份', '临时', '资料', '桌面', '我的文档', 
-                    '收藏', '待看', '已看', '整理', '回收站'
-                ]
-                noise = random.choice(prefix_list)
+                noise = random.choice(self.PREFIX_LIST)
                 # 目录分隔符主要是斜杠，偶尔用点
                 sep = random.choice(['/', '\\', '/', '\\', '.']) 
                 input_path = f"{noise}{sep}{input_path}"
             else:
                 # --- 情况 2：加后缀 (模拟文件属性/标签) ---
-                suffix_list = [
-                    # 常见视频扩展名
-                    'mp4', 'mkv', 'avi', 'rmvb', 'wmv', 'mov', 'flv', 'iso', 'torrent',
-                    
-                    # 画质/编码
-                    '1080p', '720p', '2160p', '4K', 'x264', 'x265', 'HEVC', 
-                    'HDR', 'BluRay', 'BDrip', 'WebDL', 'HDTV', 'AAC', 'DTS', 'Atmos',
-                    
-                    # 中文标签/状态
-                    '高清', '蓝光', '字幕', '福利', '完结', '未删减', '加长版',
-                    '中字', '双语', '国语', '特效字幕', '含花絮', '修正版',
-                    
-                    # 常见干扰词
-                    'Backup', 'Copy', 'Temp', '副本'
-                ]
-                noise = random.choice(suffix_list)
+                noise = random.choice(self.SUFFIX_LIST)
                 # 后缀分隔符主要是点、下划线、空格、短横线
                 sep = random.choice(['.', '_', ' ', '-'])
                 input_path = f"{input_path}{sep}{noise}"
@@ -327,10 +318,9 @@ def validate_one_epoch(model, loader, criterion):
 
 # --- 训练逻辑 ---
 def run_train(incremental=False):
-    # 设置全局种子
-    set_seed(SEED)
+    # set_seed(SEED)
     mode_str = "【增量训练模式】" if incremental else "【全量训练模式】"
-    print(f"{mode_str} 随机种子已固定为: {SEED}")
+    print(f"{mode_str}")
 
     # 1. 搜索所有匹配的文件
     data_files = glob.glob(DATA_FILE_PATTERN)
@@ -417,10 +407,9 @@ def run_train(incremental=False):
 
     if len(train_ds) < 1:
         print("有效样本数量不足，无法进行训练。"); return
-
-    # 【核心配置】使用 Generator 确保 shuffle 的完全可复现性
-    g = torch.Generator()
-    g.manual_seed(SEED)
+    # g = torch.Generator()
+    # g.manual_seed(SEED)
+    #train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, generator=g, num_workers=min(4, NUM_THREADS))
     
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, generator=g, num_workers=min(4, NUM_THREADS))
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=min(4, NUM_THREADS))
