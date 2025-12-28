@@ -537,7 +537,7 @@ def run_predict(path):
 if __name__ == "__main__":
     if os.path.exists("dbg"):
         DEBUG_MODE = True
-        print(f"检测到 [dbg] 文件，已强制开启调试模式 (DEBUG_MODE=True)")
+        print(f"检测到 [dbg] 文件，已强制开启调试模式")
 
     if len(sys.argv) > 1:
         input_arg = sys.argv[1]
