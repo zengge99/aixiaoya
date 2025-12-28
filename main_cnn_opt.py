@@ -131,7 +131,7 @@ class Extractor(nn.Module):
         self.norm1 = nn.LayerNorm(embed_dim) # 用于残差连接
         
         # 3. BiGRU (提取序列长距离依赖)
-        self.gru = nn.GRU(embed_dim, hidden_dim, bidirectional=True, batch_first=True, num_layers=2, dropout=0.25)
+        self.gru = nn.GRU(embed_dim, hidden_dim, bidirectional=True, batch_first=True, num_layers=2, dropout=0.5)
         
         # 4. Attention (注意力机制)
         self.attention_linear = nn.Linear(hidden_dim * 2, 1)
@@ -140,7 +140,7 @@ class Extractor(nn.Module):
         self.fc = nn.Sequential(
             nn.Linear(hidden_dim * 4, 128), # hidden*2(GRU) + hidden*2(Context)
             nn.ReLU(),
-            nn.Dropout(0.3),
+            nn.Dropout(0.5),
             nn.Linear(128, 1),
             nn.Sigmoid()
         )
@@ -198,37 +198,26 @@ class FocalLoss(nn.Module):
 
 # --- 数据集定义 ---
 class MovieDataset(Dataset):
-    def __init__(self, lines, char_to_idx, max_len=MAX_LEN):
+    def __init__(self, lines, char_to_idx, max_len=MAX_LEN, training=True):
         self.samples = []
+        self.char_to_idx = char_to_idx
+        self.max_len = max_len
+        self.training = training  # 控制是否开启随机增强
+        
         skipped_count = 0
         
+        # 1. 在 Init 中仅做有效性筛选，保存原始文本
         for line in lines:
             line = line.strip()
             if '#' not in line: continue
             input_path, target_name = line.rsplit('#', 1)
             target_name = target_name.strip()
             
+            # 预检查：确保原始数据是能匹配上的
             escaped_target = re.escape(target_name)
             pattern = escaped_target.replace(r'\ ', r'[._\s]+')
-            match = re.search(pattern, input_path, re.IGNORECASE)
-            
-            if match:
-                start_idx = match.start()
-                end_idx = match.end()
-                
-                # 强制小写转换，忽略大小写差异
-                input_ids = [char_to_idx.get(c.lower(), 1) for c in input_path[:max_len]]
-                labels = [0.0] * len(input_ids)
-                
-                limit = min(end_idx, max_len)
-                for i in range(start_idx, limit):
-                    labels[i] = 1.0
-                
-                pad_len = max_len - len(input_ids)
-                self.samples.append((
-                    torch.tensor(input_ids + [0] * pad_len), 
-                    torch.tensor(labels + [0.0] * pad_len)
-                ))
+            if re.search(pattern, input_path, re.IGNORECASE):
+                self.samples.append((input_path, target_name))
             else:
                 skipped_count += 1
 
@@ -236,7 +225,70 @@ class MovieDataset(Dataset):
             print(f"Dataset Info: 跳过了 {skipped_count} 条无法匹配标签的数据。")
 
     def __len__(self): return len(self.samples)
-    def __getitem__(self, idx): return self.samples[idx]
+
+    def __getitem__(self, idx):
+        # 2. 获取原始数据
+        input_path, target_name = self.samples[idx]
+        
+        # 3. 🎲 随机路径增强 (仅在训练模式下)
+        if self.training:
+            # === Part A: 噪声注入 (路径开头或结尾加无关词) ===
+            if random.random() < 0.3:
+                noise_list = ['Download', 'Movies', 'Temp', 'Backup', 'Data', '1080p', 'x264', 'New_Folder']
+                noise = random.choice(noise_list)
+                
+                if random.random() < 0.5:
+                    # 加在开头：模拟多了一层目录 (e.g., "Download/原始路径")
+                    sep = random.choice(['/', '\\', '.'])
+                    input_path = f"{noise}{sep}{input_path}"
+                else:
+                    # 加在结尾：模拟多了一些后缀信息 (e.g., "原始路径.1080p")
+                    sep = random.choice(['.', '_', ' '])
+                    input_path = f"{input_path}{sep}{noise}"
+
+            # === Part B: 分隔符扰动 ===
+            if random.random() < 0.3:
+                input_path = input_path.replace('.', ' ')
+            elif random.random() < 0.3:
+                input_path = input_path.replace('_', ' ')
+            elif random.random() < 0.2:
+                input_path = input_path.replace(' ', '.')
+            
+            # ❌ 错误代码已删除： return input_path 
+            # ✅ 正确逻辑：修改完 input_path 后，不返回，继续往下走，去生成 Tensor
+
+        # 4. 实时计算索引 (核心：必须用修改后的 input_path 重新计算 match)
+        escaped_target = re.escape(target_name)
+        pattern = escaped_target.replace(r'\ ', r'[._\s]+')
+        match = re.search(pattern, input_path, re.IGNORECASE)
+        
+        # 兜底：如果随机增强破坏了结构导致匹配失败（极少见），回退到原始数据
+        if not match:
+            # print("增强导致匹配失败，回退原始路径") # 调试用
+            input_path, _ = self.samples[idx]
+            match = re.search(pattern, input_path, re.IGNORECASE)
+
+        start_idx = match.start()
+        end_idx = match.end()
+        
+        # 5. 转 Tensor 和 Padding
+        # 截断输入，防止增强后长度溢出
+        input_ids = [self.char_to_idx.get(c.lower(), 1) for c in input_path[:self.max_len]]
+        labels = [0.0] * len(input_ids)
+        
+        limit = min(end_idx, self.max_len)
+        for i in range(start_idx, limit):
+            labels[i] = 1.0
+        
+        pad_len = self.max_len - len(input_ids)
+        
+        # 确保 pad_len 不为负数
+        pad_len = max(0, pad_len)
+        
+        return (
+            torch.tensor(input_ids + [0] * pad_len), 
+            torch.tensor(labels + [0.0] * pad_len)
+        )
 
 # --- 辅助函数：验证集计算 ---
 def validate_one_epoch(model, loader, criterion):
@@ -335,8 +387,9 @@ def run_train(incremental=False):
         print(f"已创建新词表，包含 {len(char_to_idx)} 个字符。")
 
     # 5. 创建 Dataset 和 DataLoader
-    train_ds = MovieDataset(all_train_lines, char_to_idx)
-    val_ds = MovieDataset(all_val_lines, char_to_idx)
+    train_ds = MovieDataset(all_train_lines, char_to_idx, training=True)
+    val_ds = MovieDataset(all_val_lines, char_to_idx, training=False)
+
 
     if len(train_ds) < 1:
         print("有效样本数量不足，无法进行训练。"); return
@@ -345,8 +398,8 @@ def run_train(incremental=False):
     g = torch.Generator()
     g.manual_seed(SEED)
     
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, generator=g)
-    val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False)
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, generator=g, num_workers=min(4, NUM_THREADS))
+    val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=min(4, NUM_THREADS))
 
     # 初始化新模型
     model = Extractor(len(char_to_idx), embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM)
