@@ -411,7 +411,7 @@ def run_train(incremental=False):
     # g.manual_seed(SEED)
     #train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, generator=g, num_workers=min(4, NUM_THREADS))
     
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, generator=g, num_workers=min(4, NUM_THREADS))
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=min(4, NUM_THREADS))
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=min(4, NUM_THREADS))
 
     # 初始化新模型
