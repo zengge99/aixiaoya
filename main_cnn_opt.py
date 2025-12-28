@@ -16,7 +16,7 @@ import string
 # --- 全局核心配置 ---
 NUM_THREADS = 4
 BATCH_SIZE = 128
-LR = 1e-4            # 学习率
+LR = 1e-3            # 学习率
 EPOCHS = 50          # 训练轮数
 MAX_LEN = 300        # 最大序列长度
 EMBED_DIM = 64      # 向量维度
@@ -564,3 +564,4 @@ if __name__ == "__main__":
     else:
         # 模式 4: 默认全量训练
         run_train(incremental=False)
+
