@@ -29,7 +29,7 @@ DATA_FILE_PATTERN = "train_data*.txt"
 SEED = 42            # 🎲 固定随机种子
 
 # --- 🔍 预测/调试配置 ---
-DEBUG_MODE = True    # 开启调试详情
+DEBUG_MODE = False    # 开启调试详情
 THRESHOLD = 0.35     # 提高判定阈值，减少噪音
 SMOOTH_VAL = 0.1     # 平滑救回阈值
 
@@ -535,6 +535,10 @@ def run_predict(path):
 
 # --- 入口控制 ---
 if __name__ == "__main__":
+    if os.path.exists("dbg"):
+        DEBUG_MODE = True
+        print(f"检测到 [dbg] 文件，已强制开启调试模式 (DEBUG_MODE=True)")
+
     if len(sys.argv) > 1:
         input_arg = sys.argv[1]
 
