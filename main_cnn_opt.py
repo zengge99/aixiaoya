@@ -178,6 +178,7 @@ class Extractor(nn.Module):
 # --- 标准加权交叉熵 Loss (比 Focal Loss 更稳健) ---
 class WeightedBCELoss(nn.Module):
     def __init__(self, pos_weight=4.0, reduction='mean'):
+        print("WeightedBCELoss")
         """
         Args:
             pos_weight (float): 正样本(电影名)的权重倍数。
