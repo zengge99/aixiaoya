@@ -30,7 +30,7 @@ SEED = 42            # 固定随机种子
 
 # --- 🔍 预测/调试配置 ---
 DEBUG_MODE = False    # 开启调试详情
-THRESHOLD = 0.35     # 提高判定阈值，减少噪音
+THRESHOLD = 0.35     # 判定阈值
 SMOOTH_VAL = 0.1     # 平滑救回阈值
 
 # 设置线程数
