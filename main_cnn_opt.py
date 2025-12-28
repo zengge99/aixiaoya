@@ -175,6 +175,42 @@ class Extractor(nn.Module):
         
         return self.fc(combined).squeeze(-1)
 
+# --- 标准加权交叉熵 Loss (比 Focal Loss 更稳健) ---
+class WeightedBCELoss(nn.Module):
+    def __init__(self, pos_weight=4.0, reduction='mean'):
+        """
+        Args:
+            pos_weight (float): 正样本(电影名)的权重倍数。
+                                默认为 4.0，意味着一个电影名字符的重要性是一个背景字符的 4 倍。
+                                (对应你之前 Focal Loss alpha=0.8 的效果)
+            reduction (str): 'mean' 或 'sum'
+        """
+        super(WeightedBCELoss, self).__init__()
+        self.pos_weight = pos_weight
+        self.reduction = reduction
+
+    def forward(self, inputs, targets):
+        # 1. 计算标准的二分类交叉熵 (不求平均，保留每个点的 loss)
+        # inputs: 模型输出的概率 (0~1)
+        # targets: 真实标签 (0 或 1)
+        bce_loss = F.binary_cross_entropy(inputs, targets, reduction='none')
+
+        # 2. 生成权重向量
+        # 如果 target 是 1 (正样本)，权重 = self.pos_weight
+        # 如果 target 是 0 (负样本)，权重 = 1.0
+        weights = targets * self.pos_weight + (1 - targets)
+
+        # 3. 加权
+        weighted_loss = bce_loss * weights
+
+        # 4. 归约返回
+        if self.reduction == 'mean':
+            return weighted_loss.mean()
+        elif self.reduction == 'sum':
+            return weighted_loss.sum()
+        else:
+            return weighted_loss
+
 # --- Focal Loss ---
 class FocalLoss(nn.Module):
     def __init__(self, alpha=0.75, gamma=2, reduction='mean'):
@@ -418,7 +454,8 @@ def run_train(incremental=False):
     model = Extractor(len(char_to_idx), embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM)
     
     # 使用 Focal Loss
-    criterion = FocalLoss(alpha=0.75, gamma=2)
+    #criterion = FocalLoss(alpha=0.75, gamma=2)
+    criterion = WeightedBCELoss(pos_weight=4.0, reduction='mean')
     optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-5) # 增加 weight_decay 防止过拟合
     
     best_val_loss = float('inf')
