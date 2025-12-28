@@ -230,21 +230,48 @@ class MovieDataset(Dataset):
         # 2. 获取原始数据
         input_path, target_name = self.samples[idx]
         
-        # 3. 🎲 随机路径增强 (仅在训练模式下)
-        if self.training:
-            # === Part A: 噪声注入 (路径开头或结尾加无关词) ===
-            if random.random() < 0.3:
-                noise_list = ['Download', 'Movies', 'Temp', 'Backup', 'Data', '1080p', 'x264', 'New_Folder']
-                noise = random.choice(noise_list)
-                
-                if random.random() < 0.5:
-                    # 加在开头：模拟多了一层目录 (e.g., "Download/原始路径")
-                    sep = random.choice(['/', '\\', '.'])
-                    input_path = f"{noise}{sep}{input_path}"
-                else:
-                    # 加在结尾：模拟多了一些后缀信息 (e.g., "原始路径.1080p")
-                    sep = random.choice(['.', '_', ' '])
-                    input_path = f"{input_path}{sep}{noise}"
+        # 3. 随机路径增强 (仅在训练模式下)
+        if random.random() < 0.3:
+            # 50% 概率加前缀（模拟目录），50% 概率加后缀（模拟文件属性）
+            if random.random() < 0.5:
+                # --- 情况 1：加前缀 (模拟父级目录) ---
+                prefix_list = [
+                    # 常见英文目录
+                    'Download', 'Downloads', 'Movies', 'TV_Shows', 'Media', 'Video', 
+                    'Temp', 'Backup', 'Data', 'New_Folder', 'Private',
+                    
+                    # 常见中文目录
+                    '下载', '迅雷下载', '百度网盘', '我的下载', '传输文件', '接收文件',
+                    '电影', '电视剧', '视频', '影视', '剧集', '动漫', '动画', 
+                    '综艺', '纪录片', '合集', '国产剧', '美剧', '日剧', '韩剧',
+                    '新建文件夹', '备份', '临时', '资料', '桌面', '我的文档', 
+                    '收藏', '待看', '已看', '整理', '回收站'
+                ]
+                noise = random.choice(prefix_list)
+                # 目录分隔符主要是斜杠，偶尔用点
+                sep = random.choice(['/', '\\', '/', '\\', '.']) 
+                input_path = f"{noise}{sep}{input_path}"
+            else:
+                # --- 情况 2：加后缀 (模拟文件属性/标签) ---
+                suffix_list = [
+                    # 常见视频扩展名
+                    'mp4', 'mkv', 'avi', 'rmvb', 'wmv', 'mov', 'flv', 'iso', 'torrent',
+                    
+                    # 画质/编码
+                    '1080p', '720p', '2160p', '4K', 'x264', 'x265', 'HEVC', 
+                    'HDR', 'BluRay', 'BDrip', 'WebDL', 'HDTV', 'AAC', 'DTS', 'Atmos',
+                    
+                    # 中文标签/状态
+                    '高清', '蓝光', '字幕', '福利', '完结', '未删减', '加长版',
+                    '中字', '双语', '国语', '特效字幕', '含花絮', '修正版',
+                    
+                    # 常见干扰词
+                    'Backup', 'Copy', 'Temp', '副本'
+                ]
+                noise = random.choice(suffix_list)
+                # 后缀分隔符主要是点、下划线、空格、短横线
+                sep = random.choice(['.', '_', ' ', '-'])
+                input_path = f"{input_path}{sep}{noise}"
 
             # === Part B: 分隔符扰动 ===
             if random.random() < 0.3:
@@ -253,11 +280,8 @@ class MovieDataset(Dataset):
                 input_path = input_path.replace('_', ' ')
             elif random.random() < 0.2:
                 input_path = input_path.replace(' ', '.')
-            
-            # ❌ 错误代码已删除： return input_path 
-            # ✅ 正确逻辑：修改完 input_path 后，不返回，继续往下走，去生成 Tensor
 
-        # 4. 实时计算索引 (核心：必须用修改后的 input_path 重新计算 match)
+        # 4. 实时计算索引 (用修改后的 input_path 重新计算 match)
         escaped_target = re.escape(target_name)
         pattern = escaped_target.replace(r'\ ', r'[._\s]+')
         match = re.search(pattern, input_path, re.IGNORECASE)
