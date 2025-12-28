@@ -26,7 +26,7 @@ MODEL_PATH = "movie_model.pth"
 VOCAB_PATH = "vocab.pkl"
 # 数据文件匹配模式 (匹配 train_data.txt, train_data_2.txt 等)
 DATA_FILE_PATTERN = "train_data*.txt" 
-SEED = 42            # 🎲 固定随机种子
+SEED = 42            # 固定随机种子
 
 # --- 🔍 预测/调试配置 ---
 DEBUG_MODE = False    # 开启调试详情
@@ -36,7 +36,7 @@ SMOOTH_VAL = 0.1     # 平滑救回阈值
 # 设置线程数
 torch.set_num_threads(NUM_THREADS)
 
-# --- 🛠️ 辅助工具类 ---
+# --- 辅助工具类 ---
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
@@ -182,7 +182,6 @@ class WeightedBCELoss(nn.Module):
         Args:
             pos_weight (float): 正样本(电影名)的权重倍数。
                                 默认为 4.0，意味着一个电影名字符的重要性是一个背景字符的 4 倍。
-                                (对应你之前 Focal Loss alpha=0.8 的效果)
             reduction (str): 'mean' 或 'sum'
         """
         super(WeightedBCELoss, self).__init__()
@@ -491,7 +490,7 @@ def run_train(incremental=False):
                 avg_val_loss = validate_one_epoch(model, val_loader, criterion)
                 
                 if avg_val_loss < best_val_loss:
-                    print(f" ✨ Loss 优化 ({best_val_loss:.4f} -> {avg_val_loss:.4f})，模型已更新。")
+                    print(f" ✨ 验证集 Loss 优化 ({best_val_loss:.4f} -> {avg_val_loss:.4f})，模型已更新。")
                     best_val_loss = avg_val_loss
                     torch.save(model.state_dict(), MODEL_PATH)
                 else:
@@ -579,9 +578,12 @@ def run_predict(path):
 
     if DEBUG_MODE: 
         print(f"提取原文: {raw_result}")
-        print(f"最终结果: {path}#{clean_result}")
+        print(f"最终结果: {clean_result}")
     else: 
-        print(f"{path}#{clean_result}")
+        if clean_result:
+            print(f"{path}#{clean_result}")
+        else:
+            print(f"{path}")
 
 # --- 入口控制 ---
 if __name__ == "__main__":
