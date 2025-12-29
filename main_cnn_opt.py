@@ -28,7 +28,7 @@ VOCAB_PATH = "vocab.pkl"
 DATA_FILE_PATTERN = "train_data*.txt" 
 SEED = 42            # 固定随机种子
 
-# --- 🔍 预测/调试配置 ---
+# --- 预测/调试配置 ---
 DEBUG_MODE = False    # 开启调试详情
 THRESHOLD = 0.35     # 判定阈值
 SMOOTH_VAL = 0.1     # 平滑救回阈值
@@ -289,9 +289,7 @@ class MovieDataset(Dataset):
             if random.random() < 0.5:
                 # --- 情况 1：加前缀 (模拟父级目录) ---
                 noise = random.choice(self.PREFIX_LIST)
-                # 目录分隔符主要是斜杠，偶尔用点
-                sep = random.choice(['/', '\\', '/', '\\', '.']) 
-                input_path = f"{noise}{sep}{input_path}"
+                input_path = f"{noise}/{input_path}"
             else:
                 # --- 情况 2：加后缀 (模拟文件属性/标签) ---
                 noise = random.choice(self.SUFFIX_LIST)
@@ -599,8 +597,7 @@ def predict_single_path(path, model, char_to_idx):
             print(f"{path}#")
 
 def run_batch_predict(file_path):
-    """批量预测文件中的所有路径，仅初始化1次模型"""
-    # 1. 一次性初始化模型和词表（核心优化）
+    # 1. 一次性初始化模型和词表
     model, char_to_idx = init_model_and_vocab()
     if model is None or char_to_idx is None:
         return
@@ -613,7 +610,7 @@ def run_batch_predict(file_path):
         print(f"读取文件失败: {e}")
         return
     
-    # 3. 循环预测所有路径（复用模型）
+    # 3. 循环预测所有路径
     total_lines = len(lines)
     for idx, line in enumerate(lines):
         predict_single_path(line, model, char_to_idx)
@@ -632,7 +629,7 @@ if __name__ == "__main__":
             run_train(incremental=True)
         
         elif os.path.exists(input_arg) and os.path.isfile(input_arg):
-            # 模式 2: 批量预测（调用优化后的函数）
+            # 模式 2: 批量预测
             print(f"检测到输入为文件: [{input_arg}]，开始批量处理...")
             run_batch_predict(input_arg)
         
