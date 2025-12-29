@@ -504,21 +504,31 @@ def run_train(incremental=False):
                 
     except KeyboardInterrupt: print("\n🛑 用户手动停止训练。")
 
-# --- 预测逻辑 ---
-def run_predict(path):
+# --- 一次性初始化模型 ---
+def init_model_and_vocab():
+    """初始化模型和词表，返回 (model, char_to_idx)，批量预测时仅调用1次"""
     if not os.path.exists(MODEL_PATH) or not os.path.exists(VOCAB_PATH):
-        print("错误: 找不到模型或词表文件。请先运行训练。"); return
+        print("错误: 找不到模型或词表文件。请先运行训练。")
+        return None, None
+    
+    # 加载词表（仅1次）
+    with open(VOCAB_PATH, 'rb') as f:
+        char_to_idx = pickle.load(f)
+    
+    # 初始化模型 + 加载权重（仅1次）
+    model = Extractor(len(char_to_idx), embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM)
+    model.load_state_dict(torch.load(MODEL_PATH, map_location='cpu'))
+    model.eval()  # 预测模式，禁用Dropout/BatchNorm
+    
+    return model, char_to_idx
 
+def predict_single_path(path, model, char_to_idx):
+    """单条路径预测，复用已初始化的模型"""
     if '#' in path:
         print(path)
         return
-
-    with open(VOCAB_PATH, 'rb') as f: char_to_idx = pickle.load(f)
-    model = Extractor(len(char_to_idx), embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM)
-    model.load_state_dict(torch.load(MODEL_PATH, map_location='cpu'))
-    model.eval()
-
-    # 预测输入转小写
+    
+    # 输入预处理（仅处理当前路径，无重复加载）
     input_ids = [char_to_idx.get(c.lower(), 1) for c in path[:MAX_LEN]]
     padded = input_ids + [0] * (MAX_LEN - len(input_ids))
     
@@ -588,6 +598,26 @@ def run_predict(path):
         else:
             print(f"{path}#")
 
+def run_batch_predict(file_path):
+    """批量预测文件中的所有路径，仅初始化1次模型"""
+    # 1. 一次性初始化模型和词表（核心优化）
+    model, char_to_idx = init_model_and_vocab()
+    if model is None or char_to_idx is None:
+        return
+    
+    # 2. 读取文件中的所有路径
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            lines = [line.strip() for line in f.readlines() if line.strip()]
+    except Exception as e:
+        print(f"读取文件失败: {e}")
+        return
+    
+    # 3. 循环预测所有路径（复用模型）
+    total_lines = len(lines)
+    for idx, line in enumerate(lines):
+        predict_single_path(line, model, char_to_idx)
+
 # --- 入口控制 ---
 if __name__ == "__main__":
     if os.path.exists("dbg"):
@@ -602,25 +632,15 @@ if __name__ == "__main__":
             run_train(incremental=True)
         
         elif os.path.exists(input_arg) and os.path.isfile(input_arg):
-            # 模式 2: 批量预测 (输入是文件路径)
-            try:
-                print(f"检测到输入为文件: [{input_arg}]，开始批量处理...")
-                with open(input_arg, 'r', encoding='utf-8') as f:
-                    lines = f.readlines()
-                
-                total_lines = len(lines)
-                for idx, line in enumerate(lines):
-                    line = line.strip()
-                    if not line: continue
-                    run_predict(line)
-                    
-            except Exception as e:
-                print(f"读取文件失败: {e}")
+            # 模式 2: 批量预测（调用优化后的函数）
+            print(f"检测到输入为文件: [{input_arg}]，开始批量处理...")
+            run_batch_predict(input_arg)
         
         else:
             # 模式 3: 单条字符串预测
-            run_predict(input_arg)
+            model, char_to_idx = init_model_and_vocab()
+            if model and char_to_idx:
+                predict_single_path(input_arg, model, char_to_idx)
     else:
         # 模式 4: 默认全量训练
         run_train(incremental=False)
-
