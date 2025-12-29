@@ -583,7 +583,7 @@ def run_predict(path):
         if clean_result:
             print(f"{path}#{clean_result}")
         else:
-            print(f"{path}")
+            print(f"{path}#")
 
 # --- 入口控制 ---
 if __name__ == "__main__":
