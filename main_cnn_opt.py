@@ -307,7 +307,7 @@ class MovieDataset(Dataset):
             elif random.random() < 0.2:
                 input_path = input_path.replace(' ', '.')
 
-        # 4. 实时计算索引 (修改后：匹配最后一次出现的目标名，优先文件名)
+        # 4. 实时计算索引 (匹配最后一次出现的目标名，优先文件名)
         escaped_target = re.escape(target_name)
         pattern = escaped_target.replace(r'\ ', r'[._\s]+')
 
