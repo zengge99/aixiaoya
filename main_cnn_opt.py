@@ -307,16 +307,19 @@ class MovieDataset(Dataset):
             elif random.random() < 0.2:
                 input_path = input_path.replace(' ', '.')
 
-        # 4. 实时计算索引 (用修改后的 input_path 重新计算 match)
+        # 4. 实时计算索引 (修改后：匹配最后一次出现的目标名，优先文件名)
         escaped_target = re.escape(target_name)
         pattern = escaped_target.replace(r'\ ', r'[._\s]+')
-        match = re.search(pattern, input_path, re.IGNORECASE)
-        
-        # 兜底：如果随机增强破坏了结构导致匹配失败（极少见），回退到原始数据
+
+        # 找所有匹配项，取最后一个
+        matches = list(re.finditer(pattern, input_path, re.IGNORECASE))
+        match = matches[-1] if matches else None
+
+        # 兜底：如果匹配失败（极少见），回退到原始路径重新匹配
         if not match:
-            # print("增强导致匹配失败，回退原始路径") # 调试用
             input_path, _ = self.samples[idx]
-            match = re.search(pattern, input_path, re.IGNORECASE)
+            matches = list(re.finditer(pattern, input_path, re.IGNORECASE))
+            match = matches[-1] if matches else None
 
         start_idx = match.start()
         end_idx = match.end()
