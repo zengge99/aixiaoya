@@ -123,12 +123,12 @@ jobs:
         shell: bash
 
       # # ========== 上传原始产物和ZIP包 ==========
-      # - name: 上传${{ matrix.arch }}架构原始产物
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: movie_extractor_${{ matrix.arch }}_raw
-      #     path: release/${{ matrix.arch }}/
-      #     if-no-files-found: error
+      - name: 上传${{ matrix.arch }}架构原始产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: movie_extractor_${{ matrix.arch }}_raw
+          path: release/${{ matrix.arch }}/
+          if-no-files-found: error
 
       - name: 上传${{ matrix.arch }}架构ZIP包
         uses: actions/upload-artifact@v4
