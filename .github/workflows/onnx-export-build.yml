@@ -108,34 +108,34 @@ jobs:
         shell: bash
 
       # ========== 打包架构产物为ZIP压缩包 ==========
-      # - name: 打包${{ matrix.arch }}产物为ZIP
-      #   run: |
-      #     # 打包当前架构的产物目录为ZIP
-      #     zip -r movie_extractor_${{ matrix.arch }}.zip release/${{ matrix.arch }}/
-      #     # 验证ZIP包
-      #     if [ -f "movie_extractor_${{ matrix.arch }}.zip" ]; then
-      #       echo "✅ ${{ matrix.arch }}架构ZIP包生成成功"
-      #       ls -lh movie_extractor_${{ matrix.arch }}.zip
-      #     else
-      #       echo "❌ ${{ matrix.arch }}架构ZIP包生成失败"
-      #       exit 1
-      #     fi
-      #   shell: bash
+      - name: 打包${{ matrix.arch }}产物为ZIP
+        run: |
+          # 打包当前架构的产物目录为ZIP
+          zip -r movie_extractor_${{ matrix.arch }}.zip release/${{ matrix.arch }}/
+          # 验证ZIP包
+          if [ -f "movie_extractor_${{ matrix.arch }}.zip" ]; then
+            echo "✅ ${{ matrix.arch }}架构ZIP包生成成功"
+            ls -lh movie_extractor_${{ matrix.arch }}.zip
+          else
+            echo "❌ ${{ matrix.arch }}架构ZIP包生成失败"
+            exit 1
+          fi
+        shell: bash
 
-      # ========== 上传原始产物和ZIP包 ==========
-      - name: 上传${{ matrix.arch }}架构原始产物
-        uses: actions/upload-artifact@v4
-        with:
-          name: movie_extractor_${{ matrix.arch }}_raw
-          path: release/${{ matrix.arch }}/
-          if-no-files-found: error
-
-      # - name: 上传${{ matrix.arch }}架构ZIP包
+      # # ========== 上传原始产物和ZIP包 ==========
+      # - name: 上传${{ matrix.arch }}架构原始产物
       #   uses: actions/upload-artifact@v4
       #   with:
-      #     name: movie_extractor_${{ matrix.arch }}_zip
-      #     path: movie_extractor_${{ matrix.arch }}.zip
+      #     name: movie_extractor_${{ matrix.arch }}_raw
+      #     path: release/${{ matrix.arch }}/
       #     if-no-files-found: error
+
+      - name: 上传${{ matrix.arch }}架构ZIP包
+        uses: actions/upload-artifact@v4
+        with:
+          name: movie_extractor_${{ matrix.arch }}_zip
+          path: movie_extractor_${{ matrix.arch }}.zip
+          if-no-files-found: error
 
   # ========== 第二阶段：串行合并产物并提交 ==========
   deploy:
