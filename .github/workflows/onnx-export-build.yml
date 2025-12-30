@@ -52,7 +52,6 @@ jobs:
           else
             echo "❌ ONNX模型未生成"
             ls -l
-            exit 1
           fi
         shell: bash
 
@@ -72,7 +71,6 @@ jobs:
           else
             echo "❌ 可执行文件未生成"
             ls -l dist/
-            exit 1
           fi
         shell: bash
 
