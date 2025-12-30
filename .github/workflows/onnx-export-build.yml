@@ -11,14 +11,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # amd64 使用原生环境（速度快）
+          # amd64: 使用官方 ubuntu 镜像，无需 QEMU 模拟
           - arch: amd64
-            distro: ubuntu22.04
             qemu_arch: x86_64
-          # arm64 使用 QEMU 模拟环境
+            docker_image: ubuntu:22.04
+            
+          # arm64: 使用 arm64v8 专用镜像，开启 aarch64 模拟
           - arch: arm64
-            distro: ubuntu22.04
             qemu_arch: aarch64
+            docker_image: arm64v8/ubuntu:22.04
 
     steps:
       - name: 拉取仓库代码
@@ -29,51 +30,57 @@ jobs:
       - name: 配置 QEMU (支持跨架构)
         uses: docker/setup-qemu-action@v3
 
-      # 核心修改：使用 run-on-arch-action 在指定架构容器内运行构建
+      # 核心修改：使用 base_image 绕过内置 Dockerfile 检查
       - name: 在 ${{ matrix.arch }} 环境中构建
         uses: uraimo/run-on-arch-action@v2
         id: build
         with:
+          # 指定架构（arm64需要aarch64，amd64则是x86_64）
           arch: ${{ matrix.qemu_arch }}
-          distro: ${{ matrix.distro }}
+          # 必须设置为 none，否则会去查找不存在的 Dockerfile
+          distro: none
+          # 指定 Docker 镜像
+          base_image: ${{ matrix.docker_image }}
+          
           githubToken: ${{ github.token }}
-          # 挂载工作目录，以便容器内生成的文件能被后续步骤访问
+          # 挂载工作目录
           setup: |
             mkdir -p "${PWD}/artifacts"
           dockerRunArgs: |
             --volume "${PWD}/artifacts:/artifacts"
+          
+          # 在容器内安装环境
           install: |
             apt-get update -q -y
             apt-get install -q -y python3 python3-pip python3-venv git zip
+          
+          # 在容器内运行构建逻辑
           run: |
-            # 注意：此部分代码是在容器内部（arm64或amd64）运行的
-            
-            # 1. 创建虚拟环境 (避免系统包冲突)
+            # 1. 创建虚拟环境
             python3 -m venv venv
             source venv/bin/activate
             
-            # 2. 安装打包依赖
+            # 2. 安装依赖
             echo "正在安装依赖..."
             pip install --upgrade pip
-            # 注意：在 QEMU arm64 下安装 torch 可能较慢
             pip install onnxruntime pyinstaller torch tqdm numpy onnxscript --no-cache-dir
             
-            # 3. 打印环境信息
-            echo "当前架构: $(uname -m)"
+            # 3. 打印环境信息验证
+            echo "当前系统架构: $(uname -m)"
             python --version
             
-            # 4. 执行 PyInstaller 打包 (生成二进制文件)
+            # 4. 打包可执行文件
             echo "开始打包可执行文件..."
             pyinstaller --onefile --name movie_extractor_${{ matrix.arch }} --clean infer_onnx.py
             
-            # 5. 导出 ONNX (ONNX模型通常是跨平台的，其实只需要生成一次，但这里为了方便保留原逻辑)
+            # 5. 导出 ONNX (按需)
             echo "开始导出 ONNX..."
             python export_onnx.py
             
-            # 6. 整理产物到 artifacts 目录 (映射到宿主机)
+            # 6. 整理产物到 artifacts 目录
             mkdir -p /artifacts/release/${{ matrix.arch }}
             
-            # 移动可执行文件
+            # 复制产物
             if [ -f "dist/movie_extractor_${{ matrix.arch }}" ]; then
               cp dist/movie_extractor_${{ matrix.arch }} /artifacts/release/${{ matrix.arch }}/
               echo "✅二进制文件打包成功"
@@ -81,29 +88,21 @@ jobs:
               echo "❌二进制文件打包失败" && exit 1
             fi
             
-            # 移动 ONNX 和相关文件
             cp movie_extractor.onnx /artifacts/release/${{ matrix.arch }}/ || echo "⚠️ ONNX未生成"
             cp movie_extractor.onnx.data /artifacts/release/${{ matrix.arch }}/ || echo "⚠️ ONNX Data未生成"
             cp vocab.pkl /artifacts/release/${{ matrix.arch }}/ || echo "⚠️ vocab.pkl未生成"
             
-            # 7. 生成 ZIP 包 (在容器内直接压缩，方便后续处理)
+            # 7. 生成 ZIP 包
             cd /artifacts/release/${{ matrix.arch }}
             zip -r ../../movie_extractor_${{ matrix.arch }}.zip ./*
-            echo "✅ ZIP包生成成功: movie_extractor_${{ matrix.arch }}.zip"
+            echo "✅ ZIP包生成成功"
 
-      # 从挂载目录上传构建产物
+      # 上传构建产物
       - name: 上传 ${{ matrix.arch }} ZIP包
         uses: actions/upload-artifact@v4
         with:
           name: movie_extractor_${{ matrix.arch }}_zip
           path: artifacts/movie_extractor_${{ matrix.arch }}.zip
-
-      # 上传原始文件供检查 (可选)
-      - name: 上传 ${{ matrix.arch }} 原始产物
-        uses: actions/upload-artifact@v4
-        with:
-          name: movie_extractor_${{ matrix.arch }}_raw
-          path: artifacts/release/${{ matrix.arch }}/
 
   # ========== 第二阶段：合并产物并提交 ==========
   deploy:
@@ -120,7 +119,6 @@ jobs:
         run: mkdir -p release
         shell: bash
 
-      # 直接下载第一阶段生成的 ZIP 文件
       - name: 下载 amd64 ZIP
         uses: actions/download-artifact@v4
         with:
@@ -135,11 +133,8 @@ jobs:
 
       - name: 移动文件到最终目录
         run: |
-          # artifact 下载后通常会在文件夹里，我们需要把文件移出来
           mv temp_amd64/movie_extractor_amd64.zip release/
           mv temp_arm64/movie_extractor_arm64.zip release/
-          
-          echo "最终 release 目录内容："
           ls -l release/
         shell: bash
 
