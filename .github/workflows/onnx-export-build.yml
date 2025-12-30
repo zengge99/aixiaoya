@@ -48,6 +48,11 @@ jobs:
           cp ./vocab.pkl ./common_files/ 2>/dev/null || true
           ls -l ./common_files/
 
+      - name: 原生导出ONNX（仅arm64执行）
+        if: matrix.need_export_onnx == 'false'
+        run: |
+          mkdir -p ./common_files
+
       # ========== 核心：并行构建，arm64跳过ONNX导出 ==========
       - name: 跨架构打包（复用ONNX）
         run: |
@@ -73,7 +78,6 @@ jobs:
           RUN pip install --upgrade pip setuptools wheel
           # 复制代码+预生成的ONNX文件（核心：复用）
           COPY . .
-          mkdir -p ./common_files
           COPY ./common_files/* /app/ 2>/dev/null || true
 
           # 第一步：打包可执行文件（所有架构都执行）
