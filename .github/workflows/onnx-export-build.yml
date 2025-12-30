@@ -1,6 +1,6 @@
 name: 导出ONNX并跨架构打包
 on:
-  workflow_dispatch:
+  workflow_dispatch: # 仅手动触发
 
 jobs:
   build-cross-arch:
@@ -22,41 +22,34 @@ jobs:
       - name: 安装QEMU跨架构支持
         uses: docker/setup-qemu-action@v3
 
-      - name: 配置Python
+      - name: 配置Python（关闭缓存，避免依赖检查）
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: 'pip'
-          # 关键：指定pipenv缓存路径，跳过requirements.txt检查
-          cache-dependency-path: '**/Pipfile.lock'
+          cache: '' # 关键：空值关闭依赖缓存，彻底跳过检查
 
-      - name: 安装pipenv并初始化环境
-        run: |
-          python -m pip install --upgrade pip
-          pip install pipenv --no-cache-dir
-          # 强制生成Pipfile（解决无Pipfile导致的环境初始化失败）
-          pipenv install --python 3.12 --skip-lock
-
-      # ========== 第一步：导出ONNX模型 ==========
+      # ========== 第一步：导出ONNX模型（纯pip，无需pipenv） ==========
       - name: 第一步-安装导出依赖+导出ONNX
         run: |
-          # 安装导出所需依赖（无需依赖Pipfile，直接在pipenv环境安装）
-          pipenv run pip install torch tqdm numpy onnxscript --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple
+          # 升级pip，安装导出所需依赖
+          python -m pip install --upgrade pip
+          pip install torch tqdm numpy onnxscript --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple
           # 执行导出脚本
-          pipenv run python export_onnx.py
+          python export_onnx.py
         shell: bash
 
-      # ========== 第二步：打包可执行文件 ==========
+      # ========== 第二步：打包可执行文件（纯pip，卸载torch减小体积） ==========
       - name: 第二步-安装打包依赖+PyInstaller打包
         run: |
-          # 卸载torch减小体积
-          pipenv run pip uninstall torch -y
+          # 卸载torch，清理冗余依赖
+          pip uninstall torch -y
           # 安装打包依赖
-          pipenv run pip install onnxruntime pyinstaller --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple
-          # 执行打包
-          pipenv run pyinstaller --onefile --name movie_extractor_${{ matrix.arch }} --clean infer_onnx.py
+          pip install onnxruntime pyinstaller --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple
+          # 执行打包（指定架构名称）
+          pyinstaller --onefile --name movie_extractor_${{ matrix.arch }} --clean infer_onnx.py
         shell: bash
 
+      # 上传产物（包含可执行文件+ONNX模型+词表）
       - name: 上传${{ matrix.arch }}架构产物
         uses: actions/upload-artifact@v4
         with:
