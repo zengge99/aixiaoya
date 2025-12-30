@@ -121,6 +121,13 @@ jobs:
           fi
         shell: bash
 
+      - name: 推送产物到仓库
+        uses: EndBug/add-and-commit@v7
+        with:
+          default_author: github_actions
+          message: '推送产物到仓库'
+          add: "['./release/']"
+
       # ========== 兼容上传Action产物（可选，备用） ==========
       - name: 上传${{ matrix.arch }}架构产物（备用）
         uses: actions/upload-artifact@v4
