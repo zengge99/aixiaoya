@@ -29,15 +29,15 @@ jobs:
       - name: 安装QEMU跨架构支持
         uses: docker/setup-qemu-action@v3
 
-      # ========== 核心修改：使用Docker构建跨架构可执行文件 ==========
+      # ========== 核心修改：修复Dockerfile语法错误 ==========
       - name: 构建${{ matrix.arch }}架构可执行文件（Docker内）
         run: |
-          # 创建临时Dockerfile用于构建
+          # 创建临时Dockerfile用于构建（修复RUN指令换行符）
           cat > Dockerfile.${{ matrix.arch }} << EOF
           FROM --platform=${{ matrix.platform }} python:3.12-slim
           WORKDIR /app
           COPY . .
-          # 安装打包依赖
+          # 安装打包依赖（使用\续行符，修复语法错误）
           RUN pip uninstall -y torch && \
               pip install onnxruntime pyinstaller --no-cache-dir && \
               # 执行打包
@@ -45,6 +45,9 @@ jobs:
               # 验证产物
               ls -l dist/
           EOF
+
+          # 查看生成的Dockerfile（调试用）
+          cat Dockerfile.${{ matrix.arch }}
 
           # 构建Docker镜像并导出可执行文件
           docker buildx build \
@@ -141,7 +144,7 @@ jobs:
           name: movie_extractor_arm64_raw
           path: release/arm64
 
-      # ========== 生成ZIP包（修复原curl方式的问题） ==========
+      # ========== 生成ZIP包 ==========
       - name: 为各架构生成ZIP包
         run: |
           # 为amd64生成ZIP
