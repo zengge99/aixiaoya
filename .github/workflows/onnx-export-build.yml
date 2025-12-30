@@ -47,6 +47,7 @@ jobs:
           mkdir -p ./common_files
           cp ./movie_extractor.onnx* ./common_files/ 2>/dev/null || true
           cp ./vocab.pkl ./common_files/ 2>/dev/null || true
+          rm -rf ./release || true
           ls -l ./common_files/
 
       - name: 原生导出ONNX（仅arm64执行）
@@ -54,6 +55,8 @@ jobs:
         run: |
           mkdir -p ./common_files
           cp ./vocab.pkl ./common_files/ 2>/dev/null || true
+          rm -rf ./release || true
+          ls -l ./common_files/
 
       # ========== 核心：并行构建，arm64跳过ONNX导出 ==========
       - name: 跨架构打包（复用ONNX）
