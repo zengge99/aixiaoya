@@ -10,6 +10,7 @@ MAX_LEN = 300
 THRESHOLD = 0.35
 VOCAB_PATH = "vocab.pkl"
 ONNX_MODEL_PATH = "movie_extractor.onnx"
+DEBUG_MODE = os.path.exists("dbg")
 
 # --- 必需工具类 TextUtils（从 main.py 复制） ---
 class TextUtils:
@@ -119,6 +120,15 @@ def predict_single_path(path, sess, char_to_idx):
     outputs = sess.run(["probs"], {"input_ids": padded})
     probs = outputs[0][0][:len(path)]  # 截断到原始路径长度
 
+    if DEBUG_MODE:
+        print(f"\n{'='*65}")
+        print(f"{'索引':<4} | {'字符':<4} | {'分值':<15} | 状态")
+        print("-" * 65)
+        for i, p in enumerate(probs):
+            status = "✅ [选中]" if p > THRESHOLD else "   [排除]"
+            print(f"{i:<4} | {path[i]:<4} | {p:.10f} | {status}")
+        print(f"{'='*65}\n")
+
     # --- 后处理逻辑（和 main.py 完全一致） ---
     selected_mask = [False] * len(probs)
     
@@ -182,10 +192,6 @@ def run_batch_predict(file_path):
 
 # --- 入口控制 ---
 if __name__ == "__main__":
-    # 调试模式：同目录存在 dbg 文件则开启
-    DEBUG_MODE = os.path.exists("dbg")
-    if DEBUG_MODE:
-        print("🔍 调试模式已开启")
 
     if len(sys.argv) > 1:
         input_arg = sys.argv[1]
