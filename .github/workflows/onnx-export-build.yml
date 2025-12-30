@@ -58,9 +58,9 @@ jobs:
             EXPORT_ONNX_CMD="echo '✅ arm64复用预生成的ONNX，跳过导出步骤'"
           fi
 
-          # 创建多阶段Dockerfile
+          # 创建多阶段Dockerfile（核心修复：去掉scratch的RUN命令）
           cat > Dockerfile.${{ matrix.arch }} << EOF
-          # 第一阶段：构建阶段
+          # 第一阶段：构建阶段（所有逻辑都在这里完成）
           FROM python:3.12-slim AS builder
           WORKDIR /app
           ARG ARCH
@@ -83,17 +83,17 @@ jobs:
           # 第二步：ONNX导出（仅amd64执行，arm64跳过）
           RUN \${EXPORT_ONNX_CMD}
 
-          # 整理产物
+          # 整理产物（提前创建好目录，避免导出阶段需要mkdir）
           RUN mkdir -p /app/release/\${ARCH} \
               && cp /app/dist/movie_extractor_\${ARCH} /app/release/\${ARCH}/ || true \
               && cp /app/movie_extractor.onnx* /app/release/\${ARCH}/ 2>/dev/null || true \
               && cp /app/vocab.pkl /app/release/\${ARCH}/ 2>/dev/null || true
 
-          # 第二阶段：导出阶段
+          # 第二阶段：导出阶段（scratch镜像，仅COPY文件，无RUN）
           FROM scratch AS export-stage
           ARG ARCH
-          RUN mkdir -p /\${ARCH}
-          COPY --from=builder /app/release/\${ARCH}/* /\${ARCH}/ || true
+          # 直接COPY文件，依赖builder阶段已创建好的目录，无需在scratch中mkdir
+          COPY --from=builder /app/release/\${ARCH}/ /\${ARCH}/
           EOF
 
           # 并行构建（保留--load，解决驱动提示）
