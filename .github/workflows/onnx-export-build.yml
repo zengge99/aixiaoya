@@ -75,43 +75,62 @@ jobs:
           fi
         shell: bash
 
-      # ========== 准备产物目录（按架构分类） ==========
-      - name: 整理产物到统一目录
+      # ========== 准备产物目录（按架构分类子目录） ==========
+      - name: 整理产物到架构子目录
         run: |
-          # 创建产物目录（按架构分类）
-          mkdir -p release
+          # 创建架构专属子目录
+          mkdir -p release/${{ matrix.arch }}
           # 复制可执行文件
-          cp dist/movie_extractor_${{ matrix.arch }} release/
-          # 复制ONNX模型和词表（仅amd64架构处理，避免重复）
-          if [ "${{ matrix.arch }}" = "amd64" ]; then
-            # 检查并复制ONNX模型
-            if [ -f "movie_extractor.onnx" ]; then
-              cp movie_extractor.onnx release/
-              echo "✅ 已复制ONNX模型到release目录"
-            else
-              echo "⚠️  ONNX模型不存在，跳过复制"
-            fi
-            # 检查并复制词表文件
-            if [ -f "vocab.pkl" ]; then
-              cp vocab.pkl release/
-              echo "✅ 已复制词表文件到release目录"
-            else
-              echo "⚠️  词表文件不存在，跳过复制"
-            fi
+          cp dist/movie_extractor_${{ matrix.arch }} release/${{ matrix.arch }}/
+          # 复制ONNX模型
+          if [ -f "movie_extractor.onnx" ]; then
+            cp movie_extractor.onnx release/${{ matrix.arch }}/
+            echo "✅ 已复制ONNX模型到release/${{ matrix.arch }}目录"
+          else
+            echo "⚠️  ONNX模型不存在，跳过复制"
           fi
-          # 查看最终整理结果
-          ls -l release/
+          # 复制词表文件
+          if [ -f "vocab.pkl" ]; then
+            cp vocab.pkl release/${{ matrix.arch }}/
+            echo "✅ 已复制词表文件到release/${{ matrix.arch }}目录"
+          else
+            echo "⚠️  词表文件不存在，跳过复制"
+          fi
+          # 查看整理结果
+          ls -l release/${{ matrix.arch }}/
         shell: bash
 
-      # ========== 上传产物为Action工件（关键修改） ==========
-      - name: 上传${{ matrix.arch }}架构产物
+      # ========== 打包架构产物为ZIP压缩包 ==========
+      - name: 打包${{ matrix.arch }}产物为ZIP
+        run: |
+          # 打包当前架构的产物目录为ZIP
+          zip -r movie_extractor_${{ matrix.arch }}.zip release/${{ matrix.arch }}/
+          # 验证ZIP包
+          if [ -f "movie_extractor_${{ matrix.arch }}.zip" ]; then
+            echo "✅ ${{ matrix.arch }}架构ZIP包生成成功"
+            ls -lh movie_extractor_${{ matrix.arch }}.zip
+          else
+            echo "❌ ${{ matrix.arch }}架构ZIP包生成失败"
+            exit 1
+          fi
+        shell: bash
+
+      # ========== 上传原始产物和ZIP包 ==========
+      - name: 上传${{ matrix.arch }}架构原始产物
         uses: actions/upload-artifact@v4
         with:
-          name: movie_extractor_${{ matrix.arch }}
-          path: release/
-          if-no-files-found: error # 产物不存在则报错
+          name: movie_extractor_${{ matrix.arch }}_raw
+          path: release/${{ matrix.arch }}/
+          if-no-files-found: error
 
-  # ========== 第二阶段：串行合并产物并提交（关键新增） ==========
+      - name: 上传${{ matrix.arch }}架构ZIP包
+        uses: actions/upload-artifact@v4
+        with:
+          name: movie_extractor_${{ matrix.arch }}_zip
+          path: movie_extractor_${{ matrix.arch }}.zip
+          if-no-files-found: error
+
+  # ========== 第二阶段：串行合并产物并提交 ==========
   deploy:
     name: 合并产物并推送到仓库
     runs-on: ubuntu-latest
@@ -123,27 +142,33 @@ jobs:
           fetch-depth: 0 # 必须：拉取完整提交历史
           persist-credentials: true # 保留凭证
 
-      - name: 下载amd64架构产物
+      - name: 创建最终release目录
+        run: mkdir -p release
+        shell: bash
+
+      - name: 下载amd64架构原始产物
         uses: actions/download-artifact@v4
         with:
-          name: movie_extractor_amd64
-          path: release_temp/amd64
+          name: movie_extractor_amd64_raw
+          path: release/amd64
 
-      - name: 下载arm64架构产物
+      - name: 下载arm64架构原始产物
         uses: actions/download-artifact@v4
         with:
-          name: movie_extractor_arm64
-          path: release_temp/arm64
+          name: movie_extractor_arm64_raw
+          path: release/arm64
 
-      - name: 合并所有架构产物到最终release目录
+      - name: 下载所有架构ZIP包到release目录
         run: |
-          # 创建最终release目录
-          mkdir -p release
-          # 复制amd64产物（含ONNX和词表）
-          cp release_temp/amd64/* release/
-          # 复制arm64可执行文件（仅复制可执行文件，避免覆盖ONNX/词表）
-          cp release_temp/arm64/movie_extractor_arm64 release/
-          # 查看合并结果
+          # 下载amd64 ZIP包
+          curl -s https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts \
+            | jq -r '.artifacts[] | select(.name == "movie_extractor_amd64_zip") | .archive_download_url' \
+            | xargs curl -s -L -H "Authorization: token ${{ github.token }}" -o release/movie_extractor_amd64.zip
+          # 下载arm64 ZIP包
+          curl -s https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts \
+            | jq -r '.artifacts[] | select(.name == "movie_extractor_arm64_zip") | .archive_download_url' \
+            | xargs curl -s -L -H "Authorization: token ${{ github.token }}" -o release/movie_extractor_arm64.zip
+          # 验证ZIP包
           ls -l release/
         shell: bash
 
@@ -160,7 +185,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "⚠️  无新产物需要提交"
           else
-            git commit -m "chore: 新增amd64/arm64架构打包产物 $(date +%Y%m%d_%H%M%S)"
+            git commit -m "chore: 新增amd64/arm64架构打包产物（含ZIP包） $(date +%Y%m%d_%H%M%S)"
             git push origin main # 替换为你的分支名（如master）
             echo "✅ 产物已推送到仓库release目录"
           fi
