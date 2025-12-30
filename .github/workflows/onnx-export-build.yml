@@ -89,6 +89,13 @@ jobs:
           else
             echo "⚠️  ONNX模型不存在，跳过复制"
           fi
+          # 复制ONNX模型数据文件
+          if [ -f "movie_extractor.onnx.data" ]; then
+            cp movie_extractor.onnx.data release/${{ matrix.arch }}/
+            echo "✅ 已复制ONNX模型到release/${{ matrix.arch }}目录"
+          else
+            echo "⚠️  ONNX模型不存在，跳过复制"
+          fi
           # 复制词表文件
           if [ -f "vocab.pkl" ]; then
             cp vocab.pkl release/${{ matrix.arch }}/
