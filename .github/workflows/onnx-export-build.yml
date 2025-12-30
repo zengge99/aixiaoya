@@ -28,8 +28,8 @@ jobs:
       - name: 设置Docker Buildx（核心跨架构支持）
         uses: docker/setup-buildx-action@v3
         with:
-          install: true
-          cache-dir: /tmp/buildx-cache
+          driver: docker-container
+          use: true
 
       - name: 安装QEMU跨架构支持
         uses: docker/setup-qemu-action@v3
@@ -114,8 +114,8 @@ jobs:
             --target export-stage \
             --output type=local,dest=./release \
             --load \
-            --cache-from=type=local,src=/tmp/buildx-cache \
-            --cache-to=type=local,dest=/tmp/buildx-cache,mode=max \
+            --cache-from=type=local,src=./buildx-cache \
+            --cache-to=type=local,dest=./buildx-cache,mode=max \
             .
 
           # 验证产物
