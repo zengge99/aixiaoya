@@ -73,7 +73,7 @@ jobs:
           RUN pip install --upgrade pip setuptools wheel
           # 复制代码+预生成的ONNX文件（核心：复用）
           COPY . .
-          COPY ./common_files/* /app/ 2>/dev/null || true
+          # COPY ./common_files/* /app/ 2>/dev/null || true
 
           # 第一步：打包可执行文件（所有架构都执行）
           RUN pip uninstall -y torch || true \
