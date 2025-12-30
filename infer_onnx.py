@@ -183,12 +183,8 @@ def run_batch_predict(file_path):
         return
     
     total_lines = len(lines)
-    print(f"开始批量处理 {total_lines} 条路径...")
     for idx, line in enumerate(lines):
-        if idx % 100 == 0 and idx > 0:
-            print(f"进度: {idx}/{total_lines}")
         predict_single_path(line, sess, char_to_idx)
-    print(f"✅ 批量处理完成！")
 
 # --- 入口控制 ---
 if __name__ == "__main__":
