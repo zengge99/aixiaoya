@@ -167,7 +167,7 @@ def predict_single_path(path, sess, char_to_idx):
         clean_result = TextUtils.fix_name(path, clean_result)
 
     # 输出结果
-    print(f"{path}#{clean_result}" if clean_result else f"{path}#")
+    print(f"{path}#{clean_result}" if clean_result else f"{path}")
 
 # --- 批量预测函数 ---
 def run_batch_predict(file_path):
