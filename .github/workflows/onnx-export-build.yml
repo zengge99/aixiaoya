@@ -1,4 +1,4 @@
-name: 导出ONNX并跨架构打包
+name: 导出ONNX并跨架构打包（推送到仓库）
 on:
   workflow_dispatch:
 
@@ -16,8 +16,11 @@ jobs:
             platform: linux/arm64
 
     steps:
-      - name: 拉取仓库代码
+      - name: 拉取仓库代码（含完整历史）
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 必须：拉取完整提交历史，否则无法push
+          persist-credentials: true # 保留凭证，方便后续push
 
       - name: 安装QEMU跨架构支持
         uses: docker/setup-qemu-action@v3
@@ -28,7 +31,7 @@ jobs:
           python-version: '3.12'
           cache: ''
 
-      # ========== 调试：打印目录结构（定位文件缺失问题） ==========
+      # ========== 调试：打印目录结构 ==========
       - name: 打印初始目录文件
         run: |
           ls -l /home/runner/work/aixiaoya/aixiaoya/
@@ -38,15 +41,13 @@ jobs:
       # ========== 第一步：导出ONNX模型 ==========
       - name: 第一步-安装导出依赖+导出ONNX
         run: |
-          # 升级pip并安装依赖
           python -m pip install --upgrade pip
           pip install torch tqdm numpy onnxscript --no-cache-dir
-          # 执行导出脚本前，再次确认文件存在
           echo "导出前文件列表："
           ls -l
-          # 执行导出脚本（捕获错误，方便排查）
+          # 执行导出脚本
           python export_onnx.py || { echo "导出ONNX失败！"; ls -l; exit 1; }
-          # 验证ONNX是否生成
+          # 验证ONNX生成
           if [ -f "movie_extractor.onnx" ]; then
             echo "✅ ONNX模型生成成功"
           else
@@ -58,9 +59,7 @@ jobs:
       # ========== 第二步：打包可执行文件 ==========
       - name: 第二步-安装打包依赖+PyInstaller打包
         run: |
-          # 卸载torch
           pip uninstall torch -y
-          # 安装打包依赖
           pip install onnxruntime pyinstaller --no-cache-dir
           # 执行打包
           pyinstaller --onefile --name movie_extractor_${{ matrix.arch }} --clean infer_onnx.py || { echo "打包失败！"; ls -l dist/; exit 1; }
@@ -74,26 +73,49 @@ jobs:
           fi
         shell: bash
 
-      # ========== 验证所有产物是否存在 ==========
-      - name: 验证最终产物
+      # ========== 准备产物目录（按架构分类） ==========
+      - name: 整理产物到统一目录
         run: |
-          echo "最终文件列表："
-          ls -l
-          ls -l dist/
-          # 检查vocab.pkl（若缺失，提示需提交到仓库）
-          if [ ! -f "vocab.pkl" ]; then
-            echo "⚠️  vocab.pkl未找到，请提交到仓库！"
-            # 可选：若vocab.pkl由训练生成，需补充训练步骤
-            # python main.py train # 替换为你的训练命令
+          # 创建产物目录（按架构分类）
+          mkdir -p release/${{ matrix.arch }}
+          # 复制可执行文件
+          cp dist/movie_extractor_${{ matrix.arch }} release/${{ matrix.arch }}/
+          # 复制ONNX模型和词表（仅amd64架构上传一次，避免重复）
+          if [ "${{ matrix.arch }}" = "amd64" ]; then
+            cp movie_extractor.onnx release/
+            cp vocab.pkl release/
           fi
+          # 查看最终整理结果
+          ls -l release/
+          ls -l release/${{ matrix.arch }}/
+        shell: bash
 
-      # ========== 上传产物（兼容文件存在性） ==========
-      - name: 上传${{ matrix.arch }}架构产物
+      # ========== 推送产物到GitHub仓库 ==========
+      - name: 推送产物到仓库
+        run: |
+          # 配置git用户（CI环境需要）
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          # 检查是否有新产物
+          git add release/
+          git status
+          # 提交并推送（无变更则跳过）
+          if git diff --cached --quiet; then
+            echo "⚠️  无新产物需要提交"
+          else
+            git commit -m "chore: 新增${{ matrix.arch }}架构打包产物 $(date +%Y%m%d_%H%M%S)"
+            git push origin main # 替换为你的分支名（如master）
+            echo "✅ 产物已推送到仓库release目录"
+          fi
+        shell: bash
+
+      # ========== 兼容上传Action产物（可选，备用） ==========
+      - name: 上传${{ matrix.arch }}架构产物（备用）
         uses: actions/upload-artifact@v4
         with:
           name: movie_extractor_${{ matrix.arch }}
           path: |
-            dist/movie_extractor_${{ matrix.arch }}
-            movie_extractor.onnx
-            vocab.pkl
-          if-no-files-found: warn # 缺失文件时仅警告，不中断流程
+            release/${{ matrix.arch }}/movie_extractor_${{ matrix.arch }}
+            release/movie_extractor.onnx
+            release/vocab.pkl
+          if-no-files-found: warn
