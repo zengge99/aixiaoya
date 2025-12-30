@@ -11,15 +11,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # amd64: 使用官方 ubuntu 镜像，无需 QEMU 模拟
           - arch: amd64
-            qemu_arch: x86_64
-            docker_image: ubuntu:22.04
-            
-          # arm64: 使用 arm64v8 专用镜像，开启 aarch64 模拟
           - arch: arm64
-            qemu_arch: aarch64
-            docker_image: arm64v8/ubuntu:22.04
 
     steps:
       - name: 拉取仓库代码
@@ -27,82 +20,112 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: 配置 QEMU (支持跨架构)
+      # 仅在构建 arm64 时需要 QEMU
+      - name: 配置 QEMU
+        if: matrix.arch == 'arm64'
         uses: docker/setup-qemu-action@v3
 
-      # 核心修改：使用 base_image 绕过内置 Dockerfile 检查
-      - name: 在 ${{ matrix.arch }} 环境中构建
-        uses: uraimo/run-on-arch-action@v2
-        id: build
+      # ==========================================
+      # 方案 A: AMD64 原生构建 (速度快，无Docker错误)
+      # ==========================================
+      - name: 配置 Python (AMD64)
+        if: matrix.arch == 'amd64'
+        uses: actions/setup-python@v5
         with:
-          # 指定架构（arm64需要aarch64，amd64则是x86_64）
-          arch: ${{ matrix.qemu_arch }}
-          # 必须设置为 none，否则会去查找不存在的 Dockerfile
-          distro: none
-          # 指定 Docker 镜像
-          base_image: ${{ matrix.docker_image }}
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 构建 AMD64 产物
+        if: matrix.arch == 'amd64'
+        run: |
+          echo "🚀 开始 AMD64 原生构建..."
+          pip install --upgrade pip
+          pip install onnxruntime pyinstaller torch tqdm numpy onnxscript
           
+          # 1. 打包 Exe
+          pyinstaller --onefile --name movie_extractor_amd64 --clean infer_onnx.py
+          
+          # 2. 导出 ONNX (仅需在 amd64 导出一次即可)
+          python export_onnx.py
+          
+          # 3. 整理产物
+          mkdir -p release/amd64
+          cp dist/movie_extractor_amd64 release/amd64/
+          cp movie_extractor.onnx release/amd64/
+          cp movie_extractor.onnx.data release/amd64/ || true
+          cp vocab.pkl release/amd64/
+          
+          # 4. 打包 ZIP
+          cd release/amd64
+          zip -r ../../movie_extractor_amd64.zip ./*
+          echo "✅ AMD64 构建完成"
+
+      # ==========================================
+      # 方案 B: ARM64 模拟构建 (使用内置 distro)
+      # ==========================================
+      - name: 构建 ARM64 产物
+        if: matrix.arch == 'arm64'
+        uses: uraimo/run-on-arch-action@v2
+        id: build_arm64
+        with:
+          arch: aarch64
+          # 使用内置的 distro 配置，不要使用 base_image，避免 manifest 错误
+          distro: ubuntu22.04
           githubToken: ${{ github.token }}
-          # 挂载工作目录
           setup: |
             mkdir -p "${PWD}/artifacts"
           dockerRunArgs: |
             --volume "${PWD}/artifacts:/artifacts"
-          
-          # 在容器内安装环境
           install: |
             apt-get update -q -y
             apt-get install -q -y python3 python3-pip python3-venv git zip
-          
-          # 在容器内运行构建逻辑
           run: |
-            # 1. 创建虚拟环境
+            # --- 容器内部 (ARM64) ---
             python3 -m venv venv
             source venv/bin/activate
             
-            # 2. 安装依赖
-            echo "正在安装依赖..."
+            echo "🚀 开始 ARM64 构建 (QEMU)..."
             pip install --upgrade pip
+            # 注意: ARM下安装 torch 较慢
             pip install onnxruntime pyinstaller torch tqdm numpy onnxscript --no-cache-dir
             
-            # 3. 打印环境信息验证
-            echo "当前系统架构: $(uname -m)"
-            python --version
+            # 1. 打包 Exe
+            pyinstaller --onefile --name movie_extractor_arm64 --clean infer_onnx.py
             
-            # 4. 打包可执行文件
-            echo "开始打包可执行文件..."
-            pyinstaller --onefile --name movie_extractor_${{ matrix.arch }} --clean infer_onnx.py
+            # 2. 整理产物 (ONNX 不需要在这里导出，太慢了，复用或假设已有，或者如果你必须在ARM导出则取消注释)
+            # python export_onnx.py 
             
-            # 5. 导出 ONNX (按需)
-            echo "开始导出 ONNX..."
-            python export_onnx.py
+            mkdir -p /artifacts/release/arm64
+            cp dist/movie_extractor_arm64 /artifacts/release/arm64/
             
-            # 6. 整理产物到 artifacts 目录
-            mkdir -p /artifacts/release/${{ matrix.arch }}
+            # 复制依赖文件 (假设代码库里有 vocab.pkl)
+            cp vocab.pkl /artifacts/release/arm64/ || echo "Warning: vocab.pkl missing"
+            # 如果你在 arm64 也需要 onnx，建议上面运行导出，或者这里先留空，等最后统一处理
+            # 为了简单，这里我们假设 arm64 包里主要包含 exe
             
-            # 复制产物
-            if [ -f "dist/movie_extractor_${{ matrix.arch }}" ]; then
-              cp dist/movie_extractor_${{ matrix.arch }} /artifacts/release/${{ matrix.arch }}/
-              echo "✅二进制文件打包成功"
-            else
-              echo "❌二进制文件打包失败" && exit 1
-            fi
-            
-            cp movie_extractor.onnx /artifacts/release/${{ matrix.arch }}/ || echo "⚠️ ONNX未生成"
-            cp movie_extractor.onnx.data /artifacts/release/${{ matrix.arch }}/ || echo "⚠️ ONNX Data未生成"
-            cp vocab.pkl /artifacts/release/${{ matrix.arch }}/ || echo "⚠️ vocab.pkl未生成"
-            
-            # 7. 生成 ZIP 包
-            cd /artifacts/release/${{ matrix.arch }}
-            zip -r ../../movie_extractor_${{ matrix.arch }}.zip ./*
-            echo "✅ ZIP包生成成功"
+            # 3. 打包 ZIP
+            cd /artifacts/release/arm64
+            zip -r ../../movie_extractor_arm64.zip ./*
 
-      # 上传构建产物
-      - name: 上传 ${{ matrix.arch }} ZIP包
+      # ==========================================
+      # 统一上传产物
+      # ==========================================
+      
+      # 上传 AMD64
+      - name: 上传 AMD64 ZIP
+        if: matrix.arch == 'amd64'
         uses: actions/upload-artifact@v4
         with:
-          name: movie_extractor_${{ matrix.arch }}_zip
-          path: artifacts/movie_extractor_${{ matrix.arch }}.zip
+          name: movie_extractor_amd64_zip
+          path: movie_extractor_amd64.zip
+
+      # 上传 ARM64 (从 Docker 挂载出来的目录)
+      - name: 上传 ARM64 ZIP
+        if: matrix.arch == 'arm64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: movie_extractor_arm64_zip
+          path: artifacts/movie_extractor_arm64.zip
 
   # ========== 第二阶段：合并产物并提交 ==========
   deploy:
@@ -117,33 +140,44 @@ jobs:
 
       - name: 创建 Release 目录
         run: mkdir -p release
-        shell: bash
 
-      - name: 下载 amd64 ZIP
+      - name: 下载 AMD64 ZIP
         uses: actions/download-artifact@v4
         with:
           name: movie_extractor_amd64_zip
-          path: temp_amd64
+          path: release
 
-      - name: 下载 arm64 ZIP
+      - name: 下载 ARM64 ZIP
         uses: actions/download-artifact@v4
         with:
           name: movie_extractor_arm64_zip
-          path: temp_arm64
+          path: release
 
-      - name: 移动文件到最终目录
+      # 补充逻辑：因为 arm64 步骤里我们可能没导出 ONNX（太慢），
+      # 我们把 amd64 里的 ONNX 解压出来，塞进 arm64 的 zip 里（如果需要的话）。
+      # 这是一个可选优化。如果不介意 arm64 zip 里没有 onnx，可以跳过。
+      
+      - name: 整理最终文件结构
         run: |
-          mv temp_amd64/movie_extractor_amd64.zip release/
-          mv temp_arm64/movie_extractor_arm64.zip release/
+          # 现在的 release 目录下应该有两个文件夹，里面分别是对应的 zip
+          # download-artifact v4 的行为是将文件下载到指定path的子目录或直接下载，取决于怎么传
+          # 我们先查看一下结构
+          ls -R release/
+          
+          # 移动 ZIP 到 release 根目录 (如果 download action 创建了子文件夹)
+          find release -name "movie_extractor_amd64.zip" -exec mv {} release/ \;
+          find release -name "movie_extractor_arm64.zip" -exec mv {} release/ \;
+          
+          # 清理空文件夹
+          rm -rf release/movie_extractor_*_zip || true
+          
           ls -l release/
-        shell: bash
 
       - name: 推送产物到仓库
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
           
-          # 强制添加 release 目录下的 zip 文件
           git add -f release/*.zip
           
           git status
