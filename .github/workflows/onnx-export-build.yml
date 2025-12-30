@@ -38,7 +38,24 @@ jobs:
           echo "Python版本：$(python --version)"
           echo "Pip版本：$(pip --version)"
 
-      # ========== 第一步：导出ONNX模型 ==========
+        # ========== 第一步：打包可执行文件 ==========
+      - name: 第二步-安装打包依赖+PyInstaller打包
+        run: |
+          pip uninstall torch -y
+          pip install onnxruntime pyinstaller --no-cache-dir
+          # 执行打包
+          pyinstaller --onefile --name movie_extractor_${{ matrix.arch }} --clean infer_onnx.py || { echo "打包失败！"; ls -l dist/; exit 1; }
+          # 验证打包产物
+          if [ -f "dist/movie_extractor_${{ matrix.arch }}" ]; then
+            echo "✅ 可执行文件打包成功"
+            ls -l dist/
+          else
+            echo "❌ 可执行文件未生成"
+            ls -l dist/
+          fi
+        shell: bash
+
+      # ========== 第二步：导出ONNX模型 ==========
       - name: 第一步-安装导出依赖+导出ONNX
         run: |
           python -m pip install --upgrade pip
@@ -56,23 +73,6 @@ jobs:
           fi
         shell: bash
 
-      # ========== 第二步：打包可执行文件 ==========
-      - name: 第二步-安装打包依赖+PyInstaller打包
-        run: |
-          pip uninstall torch -y
-          pip install onnxruntime pyinstaller --no-cache-dir
-          # 执行打包
-          pyinstaller --onefile --name movie_extractor_${{ matrix.arch }} --clean infer_onnx.py || { echo "打包失败！"; ls -l dist/; exit 1; }
-          # 验证打包产物
-          if [ -f "dist/movie_extractor_${{ matrix.arch }}" ]; then
-            echo "✅ 可执行文件打包成功"
-            ls -l dist/
-          else
-            echo "❌ 可执行文件未生成"
-            ls -l dist/
-          fi
-        shell: bash
-
       # ========== 准备产物目录（按架构分类） ==========
       - name: 整理产物到统一目录
         run: |
@@ -82,8 +82,20 @@ jobs:
           cp dist/movie_extractor_${{ matrix.arch }} release/${{ matrix.arch }}/
           # 复制ONNX模型和词表（仅amd64架构上传一次，避免重复）
           if [ "${{ matrix.arch }}" = "amd64" ]; then
-            cp movie_extractor.onnx release/
-            cp vocab.pkl release/
+            # 检查并复制ONNX模型
+            if [ -f "movie_extractor.onnx" ]; then
+              cp movie_extractor.onnx release/
+              echo "✅ 已复制ONNX模型到release目录"
+            else
+              echo "⚠️  ONNX模型不存在，跳过复制"
+            fi
+            # 检查并复制词表文件
+            if [ -f "vocab.pkl" ]; then
+              cp vocab.pkl release/
+              echo "✅ 已复制词表文件到release目录"
+            else
+              echo "⚠️  词表文件不存在，跳过复制"
+            fi
           fi
           # 查看最终整理结果
           ls -l release/
