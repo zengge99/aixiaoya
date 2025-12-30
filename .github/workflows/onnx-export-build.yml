@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  # ========== 第一阶段：并行构建各架构产物 ==========
+  # ========== 第一阶段：并行构建各架构产物（保留并发） ==========
   build-cross-arch:
     name: 构建 ${{ matrix.arch }} 架构
     runs-on: ubuntu-latest
@@ -13,8 +13,10 @@ jobs:
         include:
           - arch: amd64
             platform: linux/amd64
+            need_export_onnx: "true"  # 仅amd64需要导出ONNX
           - arch: arm64
             platform: linux/arm64
+            need_export_onnx: "false" # arm64跳过导出，复用amd64的ONNX
 
     steps:
       - name: 拉取仓库代码（含完整历史）
@@ -24,19 +26,41 @@ jobs:
           persist-credentials: true
 
       - name: 设置Docker Buildx（核心跨架构支持）
-        uses: docker/setup-buildx-action@v3
+        uses: actions/setup-buildx-action@v3
         with:
           install: true
 
       - name: 安装QEMU跨架构支持
         uses: docker/setup-qemu-action@v3
 
-      # ========== 核心修改：多阶段构建+仅导出指定文件 ==========
-      - name: 跨架构打包（含ONNX导出）
+      # ========== 关键优化：前置导出ONNX（仅amd64执行，原生环境最快） ==========
+      - name: 原生导出ONNX（仅amd64执行）
+        if: matrix.need_export_onnx == 'true'
         run: |
-          # 创建多阶段Dockerfile，仅保留需要的产物
+          # 在GitHub Actions原生amd64环境导出ONNX（比容器内快，且只执行一次）
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-pip
+          pip install --upgrade pip setuptools wheel --ipv4
+          pip install --no-cache-dir --only-binary=all torch tqdm numpy onnxscript
+          python export_onnx.py
+          # 保存ONNX文件到固定目录，供后续构建复用
+          mkdir -p ./common_files
+          cp ./movie_extractor.onnx* ./common_files/ 2>/dev/null || true
+          cp ./vocab.pkl ./common_files/ 2>/dev/null || true
+          ls -l ./common_files/
+
+      # ========== 核心：并行构建，arm64跳过ONNX导出 ==========
+      - name: 跨架构打包（复用ONNX）
+        run: |
+          # 根据架构决定是否跳过ONNX导出
+          if [ "${{ matrix.need_export_onnx }}" = "true" ]; then
+            EXPORT_ONNX_CMD="pip install --no-cache-dir --only-binary=all torch tqdm numpy onnxscript && python export_onnx.py"
+          else
+            EXPORT_ONNX_CMD="echo '✅ arm64复用预生成的ONNX，跳过导出步骤'"
+          fi
+
+          # 创建多阶段Dockerfile
           cat > Dockerfile.${{ matrix.arch }} << EOF
-          # 第一阶段：构建阶段（完成编译、导出逻辑）
+          # 第一阶段：构建阶段
           FROM python:3.12-slim AS builder
           WORKDIR /app
           ARG ARCH
@@ -45,51 +69,58 @@ jobs:
               gcc \
               g++ \
               && rm -rf /var/lib/apt/lists/*
-          # 复制代码到容器
+          # 升级pip
+          RUN pip install --upgrade pip setuptools wheel --ipv4
+          # 复制代码+预生成的ONNX文件（核心：复用）
           COPY . .
-          # 第一步：安装打包依赖并打包可执行文件
+          COPY ./common_files/* /app/ 2>/dev/null || true
+
+          # 第一步：打包可执行文件（所有架构都执行）
           RUN pip uninstall -y torch || true \
-              && pip install --no-cache-dir onnxruntime pyinstaller \
+              && pip install --no-cache-dir --only-binary=all onnxruntime pyinstaller \
               && pyinstaller --onefile --name movie_extractor_\${ARCH} --clean infer_onnx.py
-          # 第二步：安装导出依赖并导出ONNX
-          RUN pip install --no-cache-dir torch tqdm numpy onnxscript \
-              && python export_onnx.py
-          # 整理产物到统一目录
+
+          # 第二步：ONNX导出（仅amd64执行，arm64跳过）
+          RUN \${EXPORT_ONNX_CMD}
+
+          # 整理产物
           RUN mkdir -p /app/release/\${ARCH} \
               && cp /app/dist/movie_extractor_\${ARCH} /app/release/\${ARCH}/ || true \
               && cp /app/movie_extractor.onnx* /app/release/\${ARCH}/ 2>/dev/null || true \
               && cp /app/vocab.pkl /app/release/\${ARCH}/ 2>/dev/null || true
 
-          # 第二阶段：仅用于导出指定文件（空白镜像，最小化体积）
+          # 第二阶段：导出阶段
           FROM scratch AS export-stage
           ARG ARCH
-          # 只复制需要的产物，排除所有冗余内容
-          COPY --from=builder /app/release/\${ARCH}/movie_extractor_\${ARCH} /\${ARCH}/
-          COPY --from=builder /app/release/\${ARCH}/movie_extractor.onnx* /\${ARCH}/
-          COPY --from=builder /app/release/\${ARCH}/vocab.pkl /\${ARCH}/
+          RUN mkdir -p /\${ARCH}
+          COPY --from=builder /app/release/\${ARCH}/* /\${ARCH}/ || true
           EOF
 
-          # 使用buildx构建并仅导出export-stage的指定文件
+          # 并行构建（保留--load，解决驱动提示）
           docker buildx build \
             --platform ${{ matrix.platform }} \
             --build-arg ARCH=${{ matrix.arch }} \
             -f Dockerfile.${{ matrix.arch }} \
             --target export-stage \
             --output type=local,dest=./release \
+            --load \
             .
 
-          # 验证产物是否存在
-          if [ -f "release/${{ matrix.arch }}/movie_extractor_${{ matrix.arch }}" ]; then
+          # 验证产物
+          mkdir -p release/${{ matrix.arch }}
+          if ls release/${{ matrix.arch }}/* 1> /dev/null 2>&1; then
             echo "✅ ${{ matrix.arch }} 架构产物存在："
             ls -l release/${{ matrix.arch }}/
-            file release/${{ matrix.arch }}/movie_extractor_${{ matrix.arch }}
+            if [ -f "release/${{ matrix.arch }}/movie_extractor_${{ matrix.arch }}" ]; then
+              file release/${{ matrix.arch }}/movie_extractor_${{ matrix.arch }}
+            fi
           else
             echo "❌ ${{ matrix.arch }} 架构产物不存在"
             exit 1
           fi
         shell: bash
 
-      # ========== 上传仅包含指定文件的产物 ==========
+      # ========== 上传产物 ==========
       - name: 上传${{ matrix.arch }}架构产物
         uses: actions/upload-artifact@v4
         with:
@@ -97,7 +128,7 @@ jobs:
           path: release/${{ matrix.arch }}/
           if-no-files-found: error
 
-  # ========== 第二阶段：串行合并产物并提交 ==========
+  # ========== 第二阶段：合并产物并提交 ==========
   deploy:
     name: 合并产物并推送到仓库
     runs-on: ubuntu-latest
@@ -127,12 +158,10 @@ jobs:
 
       - name: 打包ZIP文件
         run: |
-          # 为每个架构创建ZIP包
           cd release
           zip -r movie_extractor_amd64.zip amd64/
           zip -r movie_extractor_arm64.zip arm64/
           cd ..
-          # 验证ZIP包
           ls -l release/
         shell: bash
 
