@@ -33,7 +33,7 @@ jobs:
         run: |
           # 升级pip，安装导出所需依赖
           python -m pip install --upgrade pip
-          pip install torch tqdm numpy onnxscript --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple
+          pip install torch tqdm numpy onnxscript --no-cache-dir
           # 执行导出脚本
           python export_onnx.py
         shell: bash
@@ -44,7 +44,7 @@ jobs:
           # 卸载torch，清理冗余依赖
           pip uninstall torch -y
           # 安装打包依赖
-          pip install onnxruntime pyinstaller --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple
+          pip install onnxruntime pyinstaller --no-cache-dir
           # 执行打包（指定架构名称）
           pyinstaller --onefile --name movie_extractor_${{ matrix.arch }} --clean infer_onnx.py
         shell: bash
