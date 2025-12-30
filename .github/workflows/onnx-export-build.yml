@@ -1,6 +1,6 @@
 name: 导出ONNX并跨架构打包
 on:
-  workflow_dispatch: # 仅手动触发
+  workflow_dispatch:
 
 jobs:
   build-cross-arch:
@@ -22,39 +22,80 @@ jobs:
       - name: 安装QEMU跨架构支持
         uses: docker/setup-qemu-action@v3
 
-      - name: 配置Python（关闭缓存，避免依赖检查）
+      - name: 配置Python（关闭缓存）
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: '' # 关键：空值关闭依赖缓存，彻底跳过检查
+          cache: ''
 
-      # ========== 第一步：导出ONNX模型（纯pip，无需pipenv） ==========
+      # ========== 调试：打印目录结构（定位文件缺失问题） ==========
+      - name: 打印初始目录文件
+        run: |
+          ls -l /home/runner/work/aixiaoya/aixiaoya/
+          echo "Python版本：$(python --version)"
+          echo "Pip版本：$(pip --version)"
+
+      # ========== 第一步：导出ONNX模型 ==========
       - name: 第一步-安装导出依赖+导出ONNX
         run: |
-          # 升级pip，安装导出所需依赖
+          # 升级pip并安装依赖
           python -m pip install --upgrade pip
-          pip install torch tqdm numpy onnxscript --no-cache-dir
-          # 执行导出脚本
-          python export_onnx.py
+          pip install torch tqdm numpy onnxscript --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple
+          # 执行导出脚本前，再次确认文件存在
+          echo "导出前文件列表："
+          ls -l
+          # 执行导出脚本（捕获错误，方便排查）
+          python export_onnx.py || { echo "导出ONNX失败！"; ls -l; exit 1; }
+          # 验证ONNX是否生成
+          if [ -f "movie_extractor.onnx" ]; then
+            echo "✅ ONNX模型生成成功"
+          else
+            echo "❌ ONNX模型未生成"
+            ls -l
+            exit 1
+          fi
         shell: bash
 
-      # ========== 第二步：打包可执行文件（纯pip，卸载torch减小体积） ==========
+      # ========== 第二步：打包可执行文件 ==========
       - name: 第二步-安装打包依赖+PyInstaller打包
         run: |
-          # 卸载torch，清理冗余依赖
+          # 卸载torch
           pip uninstall torch -y
           # 安装打包依赖
-          pip install onnxruntime pyinstaller --no-cache-dir
-          # 执行打包（指定架构名称）
-          pyinstaller --onefile --name movie_extractor_${{ matrix.arch }} --clean infer_onnx.py
+          pip install onnxruntime pyinstaller --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple
+          # 执行打包
+          pyinstaller --onefile --name movie_extractor_${{ matrix.arch }} --clean infer_onnx.py || { echo "打包失败！"; ls -l dist/; exit 1; }
+          # 验证打包产物
+          if [ -f "dist/movie_extractor_${{ matrix.arch }}" ]; then
+            echo "✅ 可执行文件打包成功"
+            ls -l dist/
+          else
+            echo "❌ 可执行文件未生成"
+            ls -l dist/
+            exit 1
+          fi
         shell: bash
 
-      # 上传产物（包含可执行文件+ONNX模型+词表）
+      # ========== 验证所有产物是否存在 ==========
+      - name: 验证最终产物
+        run: |
+          echo "最终文件列表："
+          ls -l
+          ls -l dist/
+          # 检查vocab.pkl（若缺失，提示需提交到仓库）
+          if [ ! -f "vocab.pkl" ]; then
+            echo "⚠️  vocab.pkl未找到，请提交到仓库！"
+            # 可选：若vocab.pkl由训练生成，需补充训练步骤
+            # python main.py train # 替换为你的训练命令
+          fi
+
+      # ========== 上传产物（兼容文件存在性） ==========
       - name: 上传${{ matrix.arch }}架构产物
         uses: actions/upload-artifact@v4
         with:
           name: movie_extractor_${{ matrix.arch }}
-          path:
+          path: |
             dist/movie_extractor_${{ matrix.arch }}
             movie_extractor.onnx
             vocab.pkl
+          if-no-files-found: warn # 缺失文件时仅警告，不中断流程
