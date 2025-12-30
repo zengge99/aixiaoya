@@ -29,7 +29,7 @@ jobs:
           install: true
 
       - name: 安装QEMU跨架构支持
-        uses: actions/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v3
 
       # ========== 核心修改：使用Docker容器进行跨架构打包 ==========
       - name: 跨架构打包（含ONNX导出）
