@@ -634,7 +634,6 @@ if __name__ == "__main__":
         
         elif os.path.exists(input_arg) and os.path.isfile(input_arg):
             # 模式 2: 批量预测
-            print(f"检测到输入为文件: [{input_arg}]，开始批量处理...")
             run_batch_predict(input_arg)
         
         else:
