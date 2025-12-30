@@ -153,7 +153,10 @@ jobs:
           persist-credentials: true
 
       - name: 创建最终release目录
-        run: mkdir -p release
+        run: |
+          mkdir -p release
+          echo "原始目录内容："
+          ls -l release
         shell: bash
 
       - name: 下载amd64架构产物
@@ -170,6 +173,9 @@ jobs:
 
       - name: 打包ZIP文件
         run: |
+          mkdir -p release
+          echo "新目录内容："
+          ls -l release
           cd release
           zip -r movie_extractor_amd64.zip amd64/
           cp amd64/movie_extractor.onnx* arm64/
