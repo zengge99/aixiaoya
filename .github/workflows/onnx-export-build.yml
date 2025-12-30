@@ -130,12 +130,12 @@ jobs:
           path: release/${{ matrix.arch }}/
           if-no-files-found: error
 
-      - name: 上传${{ matrix.arch }}架构ZIP包
-        uses: actions/upload-artifact@v4
-        with:
-          name: movie_extractor_${{ matrix.arch }}_zip
-          path: movie_extractor_${{ matrix.arch }}.zip
-          if-no-files-found: error
+      # - name: 上传${{ matrix.arch }}架构ZIP包
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: movie_extractor_${{ matrix.arch }}_zip
+      #     path: movie_extractor_${{ matrix.arch }}.zip
+      #     if-no-files-found: error
 
   # ========== 第二阶段：串行合并产物并提交 ==========
   deploy:
