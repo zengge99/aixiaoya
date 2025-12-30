@@ -77,9 +77,9 @@ jobs:
       - name: 整理产物到统一目录
         run: |
           # 创建产物目录（按架构分类）
-          mkdir -p release/${{ matrix.arch }}
+          mkdir -p release
           # 复制可执行文件
-          cp dist/movie_extractor_${{ matrix.arch }} release/${{ matrix.arch }}/
+          cp dist/movie_extractor_${{ matrix.arch }} release/
           # 复制ONNX模型和词表（仅amd64架构上传一次，避免重复）
           if [ "${{ matrix.arch }}" = "amd64" ]; then
             # 检查并复制ONNX模型
