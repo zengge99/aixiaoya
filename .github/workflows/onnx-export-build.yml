@@ -1,4 +1,4 @@
-name: 导出ONNX并跨架构打包（推送到仓库）
+name: 导出ONNX并跨架构打包（pipenv版，推送到仓库）
 on:
   workflow_dispatch:
 
@@ -31,56 +31,73 @@ jobs:
           python-version: '3.12'
           cache: ''
 
+      # ========== 安装pipenv ==========
+      - name: 安装pipenv并初始化环境
+        run: |
+          python -m pip install --upgrade pip
+          pip install pipenv --no-cache-dir
+          # 初始化pipenv环境（无Pipfile则生成，跳过lock加速）
+          pipenv install --python 3.12 --skip-lock
+          echo "✅ pipenv环境初始化完成"
+
       # ========== 调试：打印目录结构 ==========
       - name: 打印初始目录文件
         run: |
           ls -l /home/runner/work/aixiaoya/aixiaoya/
           echo "Python版本：$(python --version)"
-          echo "Pip版本：$(pip --version)"
+          echo "Pipenv版本：$(pipenv --version)"
+          # 验证pipenv环境
+          pipenv run python --version
 
-        # ========== 第一步：打包可执行文件 ==========
-      - name: 第一步-安装打包依赖+PyInstaller打包
+      # ========== 第一步：导出ONNX模型（pipenv环境） ==========
+      - name: 第一步-pipenv安装导出依赖+导出ONNX
         run: |
-          pip uninstall torch -y
-          pip install onnxruntime pyinstaller --no-cache-dir
-          # 执行打包
-          pyinstaller --onefile --name movie_extractor_${{ matrix.arch }} --clean infer_onnx.py || { echo "打包失败！"; ls -l dist/; exit 1; }
+          # pipenv环境内安装导出依赖（torch/tqdm/numpy/onnxscript）
+          pipenv run pip install torch tqdm numpy onnxscript --no-cache-dir
+          echo "导出前文件列表："
+          ls -l
+          # 执行导出脚本（pipenv环境内运行）
+          pipenv run python export_onnx.py || { echo "⚠️  导出ONNX失败！"; ls -l; }
+          # 验证ONNX生成
+          if [ -f "movie_extractor.onnx" ]; then
+            echo "✅ ONNX模型生成成功"
+          else
+            echo "⚠️  ONNX模型未生成"
+          fi
+        shell: bash
+
+      # ========== 第二步：打包可执行文件（pipenv环境，卸载torch减小体积） ==========
+      - name: 第二步-pipenv安装打包依赖+PyInstaller打包
+        run: |
+          # pipenv环境内卸载torch（核心：减小打包体积）
+          pipenv run pip uninstall torch -y
+          # pipenv环境内安装轻量打包依赖
+          pipenv run pip install onnxruntime pyinstaller --no-cache-dir
+          # pipenv环境内执行打包（onefile模式，指定架构名称）
+          pipenv run pyinstaller --onefile --name movie_extractor_${{ matrix.arch }} --clean infer_onnx.py || { echo "⚠️  打包失败！"; ls -l dist/; }
           # 验证打包产物
           if [ -f "dist/movie_extractor_${{ matrix.arch }}" ]; then
             echo "✅ 可执行文件打包成功"
             ls -l dist/
           else
-            echo "❌ 可执行文件未生成"
+            echo "⚠️  可执行文件未生成"
             ls -l dist/
           fi
         shell: bash
 
-      # ========== 第二步：导出ONNX模型 ==========
-      - name: 第二步-安装导出依赖+导出ONNX
-        run: |
-          python -m pip install --upgrade pip
-          pip install torch tqdm numpy onnxscript --no-cache-dir
-          echo "导出前文件列表："
-          ls -l
-          # 执行导出脚本
-          python export_onnx.py || { echo "导出ONNX失败！"; ls -l; exit 1; }
-          # 验证ONNX生成
-          if [ -f "movie_extractor.onnx" ]; then
-            echo "✅ ONNX模型生成成功"
-          else
-            echo "❌ ONNX模型未生成"
-            ls -l
-          fi
-        shell: bash
-
-      # ========== 准备产物目录（按架构分类） ==========
+      # ========== 准备产物目录（按架构分类，存在性检查） ==========
       - name: 整理产物到统一目录
         run: |
           # 创建产物目录（按架构分类）
           mkdir -p release/${{ matrix.arch }}
-          # 复制可执行文件
-          cp dist/movie_extractor_${{ matrix.arch }} release/${{ matrix.arch }}/
-          # 复制ONNX模型和词表（仅amd64架构上传一次，避免重复）
+          # 复制可执行文件（存在才复制）
+          if [ -f "dist/movie_extractor_${{ matrix.arch }}" ]; then
+            cp dist/movie_extractor_${{ matrix.arch }} release/${{ matrix.arch }}/
+            echo "✅ 已复制${{ matrix.arch }}架构可执行文件到release目录"
+          else
+            echo "⚠️  ${{ matrix.arch }}架构可执行文件不存在，跳过复制"
+          fi
+          # 复制ONNX模型和词表（仅amd64架构处理，存在才复制）
           if [ "${{ matrix.arch }}" = "amd64" ]; then
             # 检查并复制ONNX模型
             if [ -f "movie_extractor.onnx" ]; then
@@ -98,24 +115,25 @@ jobs:
             fi
           fi
           # 查看最终整理结果
-          ls -l release/
-          ls -l release/${{ matrix.arch }}/
+          echo "最终release目录结构："
+          ls -l release/ || echo "release目录为空"
+          ls -l release/${{ matrix.arch }}/ || echo "${{ matrix.arch }}子目录为空"
         shell: bash
 
-      # ========== 推送产物到GitHub仓库 ==========
+      # ========== 推送产物到GitHub仓库（有产物才推送） ==========
       - name: 推送产物到仓库
         run: |
           # 配置git用户（CI环境需要）
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
-          # 检查是否有新产物
-          git add release/
+          # 检查是否有新产物（仅添加存在的文件）
+          git add release/ 2>/dev/null || echo "⚠️  无产物可添加"
           git status
           # 提交并推送（无变更则跳过）
           if git diff --cached --quiet; then
-            echo "⚠️  无新产物需要提交"
+            echo "✅ 无新产物需要提交，跳过推送"
           else
-            git commit -m "chore: 新增${{ matrix.arch }}架构打包产物 $(date +%Y%m%d_%H%M%S)"
+            git commit -m "chore: pipenv打包-${{ matrix.arch }}架构产物 $(date +%Y%m%d_%H%M%S)"
             git push origin main # 替换为你的分支名（如master）
             echo "✅ 产物已推送到仓库release目录"
           fi
@@ -125,7 +143,7 @@ jobs:
       - name: 上传${{ matrix.arch }}架构产物（备用）
         uses: actions/upload-artifact@v4
         with:
-          name: movie_extractor_${{ matrix.arch }}
+          name: movie_extractor_${{ matrix.arch }}_pipenv
           path: |
             release/${{ matrix.arch }}/movie_extractor_${{ matrix.arch }}
             release/movie_extractor.onnx
