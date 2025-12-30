@@ -74,8 +74,8 @@ jobs:
             --platform ${{ matrix.platform }} \
             --build-arg ARCH=${{ matrix.arch }} \
             -f Dockerfile.${{ matrix.arch }} \
-            --target export-stage \  # 仅构建导出阶段
-            --output type=local,dest=./release \  # 导出到release目录
+            --target export-stage \
+            --output type=local,dest=./release \
             .
 
           # 验证产物是否存在
