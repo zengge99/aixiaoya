@@ -20,94 +20,64 @@ jobs:
       - name: 拉取仓库代码（含完整历史）
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # 必须：拉取完整提交历史
-          persist-credentials: true # 保留凭证
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: 设置Docker Buildx（核心跨架构支持）
+        uses: docker/setup-buildx-action@v3
+        with:
+          install: true
 
       - name: 安装QEMU跨架构支持
-        uses: docker/setup-qemu-action@v3
+        uses: actions/setup-qemu-action@v3
 
-      - name: 配置Python（关闭缓存）
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: ''
-
-      # ========== 调试：打印目录结构 ==========
-      - name: 打印初始目录文件
+      # ========== 核心修改：使用Docker容器进行跨架构打包 ==========
+      - name: 跨架构打包（含ONNX导出）
         run: |
-          ls -l /home/runner/work/aixiaoya/aixiaoya/
-          echo "Python版本：$(python --version)"
-          echo "Pip版本：$(pip --version)"
-        shell: bash
+          # 创建临时Dockerfile用于跨架构构建
+          cat > Dockerfile.${{ matrix.arch }} << 'EOF'
+          FROM python:3.12-slim
+          WORKDIR /app
+          # 安装基础依赖
+          RUN apt-get update && apt-get install -y --no-install-recommends \
+              gcc \
+              g++ \
+              && rm -rf /var/lib/apt/lists/*
+          # 复制代码到容器
+          COPY . .
+          # 第一步：安装打包依赖并打包可执行文件
+          RUN pip uninstall -y torch || true \
+              && pip install --no-cache-dir onnxruntime pyinstaller \
+              && pyinstaller --onefile --name movie_extractor_${ARCH} --clean infer_onnx.py
+          # 第二步：安装导出依赖并导出ONNX
+          RUN pip install --no-cache-dir torch tqdm numpy onnxscript \
+              && python export_onnx.py
+          # 整理产物
+          RUN mkdir -p /app/release/${ARCH} \
+              && cp /app/dist/movie_extractor_${ARCH} /app/release/${ARCH}/ \
+              && cp /app/movie_extractor.onnx* /app/release/${ARCH}/ 2>/dev/null || true \
+              && cp /app/vocab.pkl /app/release/${ARCH}/ 2>/dev/null || true
+          EOF
 
-      # ========== 第一步：打包可执行文件 ==========
-      - name: 第一步-安装打包依赖+PyInstaller打包
-        run: |
-          pip uninstall torch -y
-          pip install onnxruntime pyinstaller --no-cache-dir
-          # 执行打包
-          pyinstaller --onefile --name movie_extractor_${{ matrix.arch }} --clean infer_onnx.py || { echo "打包失败！"; ls -l dist/; exit 1; }
-          # 验证打包产物
-          if [ -f "dist/movie_extractor_${{ matrix.arch }}" ]; then
-            echo "✅ 可执行文件打包成功"
-            ls -l dist/
+          # 使用buildx构建跨架构镜像并导出产物
+          docker buildx build \
+            --platform ${{ matrix.platform }} \
+            --build-arg ARCH=${{ matrix.arch }} \
+            -f Dockerfile.${{ matrix.arch }} \
+            --output type=local,dest=./ \
+            .
+
+          # 验证产物架构
+          if [ -f "release/${{ matrix.arch }}/movie_extractor_${{ matrix.arch }}" ]; then
+            echo "✅ 产物文件存在，验证架构："
+            file release/${{ matrix.arch }}/movie_extractor_${{ matrix.arch }}
           else
-            echo "❌ 可执行文件未生成"
-            ls -l dist/
-          fi
-        shell: bash
-
-      # ========== 第二步：导出ONNX模型 ==========
-      - name: 第二步-安装导出依赖+导出ONNX
-        run: |
-          python -m pip install --upgrade pip
-          pip install torch tqdm numpy onnxscript --no-cache-dir
-          echo "导出前文件列表："
-          ls -l
-          # 执行导出脚本
-          python export_onnx.py || { echo "导出ONNX失败！"; ls -l; exit 1; }
-          # 验证ONNX生成
-          if [ -f "movie_extractor.onnx" ]; then
-            echo "✅ ONNX模型生成成功"
-          else
-            echo "❌ ONNX模型未生成"
-            ls -l
+            echo "❌ 产物文件不存在"
+            exit 1
           fi
         shell: bash
 
-      # ========== 准备产物目录（按架构分类子目录） ==========
-      - name: 整理产物到架构子目录
-        run: |
-          # 创建架构专属子目录
-          mkdir -p release/${{ matrix.arch }}
-          # 复制可执行文件
-          cp dist/movie_extractor_${{ matrix.arch }} release/${{ matrix.arch }}/
-          # 复制ONNX模型
-          if [ -f "movie_extractor.onnx" ]; then
-            cp movie_extractor.onnx release/${{ matrix.arch }}/
-            echo "✅ 已复制ONNX模型到release/${{ matrix.arch }}目录"
-          else
-            echo "⚠️  ONNX模型不存在，跳过复制"
-          fi
-          # 复制ONNX模型数据文件
-          if [ -f "movie_extractor.onnx.data" ]; then
-            cp movie_extractor.onnx.data release/${{ matrix.arch }}/
-            echo "✅ 已复制ONNX模型到release/${{ matrix.arch }}目录"
-          else
-            echo "⚠️  ONNX模型不存在，跳过复制"
-          fi
-          # 复制词表文件
-          if [ -f "vocab.pkl" ]; then
-            cp vocab.pkl release/${{ matrix.arch }}/
-            echo "✅ 已复制词表文件到release/${{ matrix.arch }}目录"
-          else
-            echo "⚠️  词表文件不存在，跳过复制"
-          fi
-          # 查看整理结果
-          ls -l release/${{ matrix.arch }}/
-        shell: bash
-
-      # ========== 上传原始产物和ZIP包 ==========
+      # ========== 上传原始产物 ==========
       - name: 上传${{ matrix.arch }}架构原始产物
         uses: actions/upload-artifact@v4
         with:
@@ -119,59 +89,54 @@ jobs:
   deploy:
     name: 合并产物并推送到仓库
     runs-on: ubuntu-latest
-    needs: build-cross-arch # 依赖所有构建作业完成
+    needs: build-cross-arch
     steps:
-      - name: 拉取仓库代码（含完整历史）
+      - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # 必须：拉取完整提交历史
-          persist-credentials: true # 保留凭证
+          fetch-depth: 0
+          persist-credentials: true
 
       - name: 创建最终release目录
         run: mkdir -p release
         shell: bash
 
-      - name: 下载amd64架构原始产物
+      - name: 下载amd64架构产物
         uses: actions/download-artifact@v4
         with:
           name: movie_extractor_amd64_raw
           path: release/amd64
 
-      - name: 下载arm64架构原始产物
+      - name: 下载arm64架构产物
         uses: actions/download-artifact@v4
         with:
           name: movie_extractor_arm64_raw
           path: release/arm64
 
-      - name: 下载所有架构ZIP包到release目录
+      - name: 打包ZIP文件
         run: |
-          # 下载amd64 ZIP包
-          curl -s https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts \
-            | jq -r '.artifacts[] | select(.name == "movie_extractor_amd64_raw") | .archive_download_url' \
-            | xargs curl -s -L -H "Authorization: token ${{ github.token }}" -o release/movie_extractor_amd64.zip
-          # 下载arm64 ZIP包
-          curl -s https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts \
-            | jq -r '.artifacts[] | select(.name == "movie_extractor_arm64_raw") | .archive_download_url' \
-            | xargs curl -s -L -H "Authorization: token ${{ github.token }}" -o release/movie_extractor_arm64.zip
+          # 为每个架构创建ZIP包
+          cd release
+          zip -r movie_extractor_amd64.zip amd64/
+          zip -r movie_extractor_arm64.zip arm64/
+          cd ..
           # 验证ZIP包
           ls -l release/
         shell: bash
 
-      # ========== 推送合并后的产物到仓库（串行执行） ==========
       - name: 推送产物到仓库
         run: |
-          # 配置git用户（CI环境需要）
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
-          # 检查是否有新产物
-          git add release/*.zip
+          
+          git add release/
           git status
-          # 提交并推送（无变更则跳过）
+          
           if git diff --cached --quiet; then
             echo "⚠️  无新产物需要提交"
           else
             git commit -m "chore: 新增amd64/arm64架构打包产物（含ZIP包） $(date +%Y%m%d_%H%M%S)"
-            git push origin main # 替换为你的分支名（如master）
+            git push origin main
             echo "✅ 产物已推送到仓库release目录"
           fi
         shell: bash
