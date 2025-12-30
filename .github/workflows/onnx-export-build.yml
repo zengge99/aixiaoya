@@ -52,6 +52,7 @@ jobs:
         if: matrix.need_export_onnx == 'false'
         run: |
           mkdir -p ./common_files
+          cp ./vocab.pkl ./common_files/ 2>/dev/null || true
 
       # ========== 核心：并行构建，arm64跳过ONNX导出 ==========
       - name: 跨架构打包（复用ONNX）
