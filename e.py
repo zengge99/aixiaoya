@@ -32,7 +32,7 @@ def export_onnx():
         model,
         dummy_input,
         onnx_path,
-        opset_version=12,
+        opset_version=17,
         do_constant_folding=True,
         input_names=["input_ids"],
         output_names=["probs"],
