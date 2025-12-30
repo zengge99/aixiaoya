@@ -11,159 +11,151 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # amd64 使用原生环境（速度快）
           - arch: amd64
-            platform: linux/amd64
+            distro: ubuntu22.04
+            qemu_arch: x86_64
+          # arm64 使用 QEMU 模拟环境
           - arch: arm64
-            platform: linux/arm64
+            distro: ubuntu22.04
+            qemu_arch: aarch64
 
     steps:
-      - name: 拉取仓库代码（含完整历史）
+      - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: true
 
-      - name: 设置Docker Buildx（支持多架构构建）
-        uses: docker/setup-buildx-action@v3
-
-      - name: 安装QEMU跨架构支持
+      - name: 配置 QEMU (支持跨架构)
         uses: docker/setup-qemu-action@v3
 
-      # ========== 核心修复：单行RUN指令，彻底解决换行符问题 ==========
-      - name: 构建${{ matrix.arch }}架构可执行文件（Docker内）
-        run: |
-          # 创建临时Dockerfile（RUN指令写在单行，避免换行符问题）
-          echo "FROM --platform=${{ matrix.platform }} python:3.12-slim" > Dockerfile.${{ matrix.arch }}
-          echo "WORKDIR /app" >> Dockerfile.${{ matrix.arch }}
-          echo "COPY . ." >> Dockerfile.${{ matrix.arch }}
-          # 关键：RUN指令全部写在单行，用&&连接所有命令
-          echo "RUN pip uninstall -y torch && pip install onnxruntime pyinstaller --no-cache-dir && pyinstaller --onefile --name movie_extractor_${{ matrix.arch }} --clean infer_onnx.py && ls -l dist/" >> Dockerfile.${{ matrix.arch }}
-
-          # 查看生成的Dockerfile（调试用，确认语法正确）
-          echo "=== 生成的Dockerfile内容 ==="
-          cat Dockerfile.${{ matrix.arch }}
-          echo "============================"
-
-          # 构建Docker镜像并导出可执行文件
-          docker buildx build \
-            --platform ${{ matrix.platform }} \
-            -f Dockerfile.${{ matrix.arch }} \
-            -o type=local,dest=./docker_out .
-
-          # 验证导出的可执行文件
-          if [ -f "docker_out/dist/movie_extractor_${{ matrix.arch }}" ]; then
-            echo "✅ ${{ matrix.arch }}架构可执行文件构建成功"
-            # 检查文件架构
-            file docker_out/dist/movie_extractor_${{ matrix.arch }}
-            mkdir -p dist
-            cp docker_out/dist/movie_extractor_${{ matrix.arch }} dist/
-          else
-            echo "❌ ${{ matrix.arch }}架构可执行文件构建失败"
-            ls -l docker_out/
-            exit 1
-          fi
-        shell: bash
-
-      # ========== 导出ONNX模型（宿主机执行，模型文件跨架构通用） ==========
-      - name: 导出ONNX模型
-        run: |
-          # 配置Python环境
-          python -m pip install --upgrade pip
-          pip install torch tqdm numpy onnxscript --no-cache-dir
-          # 执行导出脚本
-          python export_onnx.py || { echo "导出ONNX失败！"; ls -l; exit 1; }
-          # 验证ONNX生成
-          if [ -f "movie_extractor.onnx" ]; then
-            echo "✅ ONNX模型生成成功"
-          else
-            echo "❌ ONNX模型未生成"
-            ls -l
-          fi
-        shell: bash
-
-      # ========== 准备产物目录（按架构分类子目录） ==========
-      - name: 整理产物到架构子目录
-        run: |
-          # 创建架构专属子目录
-          mkdir -p release/${{ matrix.arch }}
-          # 复制可执行文件
-          cp dist/movie_extractor_${{ matrix.arch }} release/${{ matrix.arch }}/
-          # 复制ONNX相关文件
-          for file in movie_extractor.onnx movie_extractor.onnx.data vocab.pkl; do
-            if [ -f "$file" ]; then
-              cp "$file" release/${{ matrix.arch }}/
-              echo "✅ 已复制$file到release/${{ matrix.arch }}目录"
+      # 核心修改：使用 run-on-arch-action 在指定架构容器内运行构建
+      - name: 在 ${{ matrix.arch }} 环境中构建
+        uses: uraimo/run-on-arch-action@v2
+        id: build
+        with:
+          arch: ${{ matrix.qemu_arch }}
+          distro: ${{ matrix.distro }}
+          githubToken: ${{ github.token }}
+          # 挂载工作目录，以便容器内生成的文件能被后续步骤访问
+          setup: |
+            mkdir -p "${PWD}/artifacts"
+          dockerRunArgs: |
+            --volume "${PWD}/artifacts:/artifacts"
+          install: |
+            apt-get update -q -y
+            apt-get install -q -y python3 python3-pip python3-venv git zip
+          run: |
+            # 注意：此部分代码是在容器内部（arm64或amd64）运行的
+            
+            # 1. 创建虚拟环境 (避免系统包冲突)
+            python3 -m venv venv
+            source venv/bin/activate
+            
+            # 2. 安装打包依赖
+            echo "正在安装依赖..."
+            pip install --upgrade pip
+            # 注意：在 QEMU arm64 下安装 torch 可能较慢
+            pip install onnxruntime pyinstaller torch tqdm numpy onnxscript --no-cache-dir
+            
+            # 3. 打印环境信息
+            echo "当前架构: $(uname -m)"
+            python --version
+            
+            # 4. 执行 PyInstaller 打包 (生成二进制文件)
+            echo "开始打包可执行文件..."
+            pyinstaller --onefile --name movie_extractor_${{ matrix.arch }} --clean infer_onnx.py
+            
+            # 5. 导出 ONNX (ONNX模型通常是跨平台的，其实只需要生成一次，但这里为了方便保留原逻辑)
+            echo "开始导出 ONNX..."
+            python export_onnx.py
+            
+            # 6. 整理产物到 artifacts 目录 (映射到宿主机)
+            mkdir -p /artifacts/release/${{ matrix.arch }}
+            
+            # 移动可执行文件
+            if [ -f "dist/movie_extractor_${{ matrix.arch }}" ]; then
+              cp dist/movie_extractor_${{ matrix.arch }} /artifacts/release/${{ matrix.arch }}/
+              echo "✅二进制文件打包成功"
             else
-              echo "⚠️  $file不存在，跳过复制"
+              echo "❌二进制文件打包失败" && exit 1
             fi
-          done
-          # 查看整理结果
-          ls -l release/${{ matrix.arch }}/
-          # 验证可执行文件架构
-          file release/${{ matrix.arch }}/movie_extractor_${{ matrix.arch }}
-        shell: bash
+            
+            # 移动 ONNX 和相关文件
+            cp movie_extractor.onnx /artifacts/release/${{ matrix.arch }}/ || echo "⚠️ ONNX未生成"
+            cp movie_extractor.onnx.data /artifacts/release/${{ matrix.arch }}/ || echo "⚠️ ONNX Data未生成"
+            cp vocab.pkl /artifacts/release/${{ matrix.arch }}/ || echo "⚠️ vocab.pkl未生成"
+            
+            # 7. 生成 ZIP 包 (在容器内直接压缩，方便后续处理)
+            cd /artifacts/release/${{ matrix.arch }}
+            zip -r ../../movie_extractor_${{ matrix.arch }}.zip ./*
+            echo "✅ ZIP包生成成功: movie_extractor_${{ matrix.arch }}.zip"
 
-      # ========== 上传原始产物 ==========
-      - name: 上传${{ matrix.arch }}架构原始产物
+      # 从挂载目录上传构建产物
+      - name: 上传 ${{ matrix.arch }} ZIP包
+        uses: actions/upload-artifact@v4
+        with:
+          name: movie_extractor_${{ matrix.arch }}_zip
+          path: artifacts/movie_extractor_${{ matrix.arch }}.zip
+
+      # 上传原始文件供检查 (可选)
+      - name: 上传 ${{ matrix.arch }} 原始产物
         uses: actions/upload-artifact@v4
         with:
           name: movie_extractor_${{ matrix.arch }}_raw
-          path: release/${{ matrix.arch }}/
-          if-no-files-found: error
+          path: artifacts/release/${{ matrix.arch }}/
 
-  # ========== 第二阶段：串行合并产物并提交 ==========
+  # ========== 第二阶段：合并产物并提交 ==========
   deploy:
     name: 合并产物并推送到仓库
     runs-on: ubuntu-latest
     needs: build-cross-arch
     steps:
-      - name: 拉取仓库代码（含完整历史）
+      - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: true
 
-      - name: 创建最终release目录
+      - name: 创建 Release 目录
         run: mkdir -p release
         shell: bash
 
-      - name: 下载amd64架构原始产物
+      # 直接下载第一阶段生成的 ZIP 文件
+      - name: 下载 amd64 ZIP
         uses: actions/download-artifact@v4
         with:
-          name: movie_extractor_amd64_raw
-          path: release/amd64
+          name: movie_extractor_amd64_zip
+          path: temp_amd64
 
-      - name: 下载arm64架构原始产物
+      - name: 下载 arm64 ZIP
         uses: actions/download-artifact@v4
         with:
-          name: movie_extractor_arm64_raw
-          path: release/arm64
+          name: movie_extractor_arm64_zip
+          path: temp_arm64
 
-      # ========== 生成ZIP包 ==========
-      - name: 为各架构生成ZIP包
+      - name: 移动文件到最终目录
         run: |
-          # 为amd64生成ZIP
-          cd release/amd64 && zip -r ../movie_extractor_amd64.zip . && cd -
-          # 为arm64生成ZIP
-          cd release/arm64 && zip -r ../movie_extractor_arm64.zip . && cd -
-          # 验证ZIP包
+          # artifact 下载后通常会在文件夹里，我们需要把文件移出来
+          mv temp_amd64/movie_extractor_amd64.zip release/
+          mv temp_arm64/movie_extractor_arm64.zip release/
+          
+          echo "最终 release 目录内容："
           ls -l release/
         shell: bash
 
-      # ========== 推送合并后的产物到仓库 ==========
       - name: 推送产物到仓库
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
-          # 添加所有release目录下的文件
-          git add release/
+          
+          # 强制添加 release 目录下的 zip 文件
+          git add -f release/*.zip
+          
           git status
-          # 提交并推送（无变更则跳过）
           if git diff --cached --quiet; then
-            echo "⚠️  无新产物需要提交"
+            echo "⚠️ 无新产物需要提交"
           else
-            git commit -m "chore: 新增amd64/arm64架构打包产物（含ZIP包） $(date +%Y%m%d_%H%M%S)"
+            git commit -m "chore: 更新构建产物 amd64/arm64 $(date +%Y%m%d_%H%M%S)"
             git push origin main
-            echo "✅ 产物已推送到仓库release目录"
+            echo "✅ 产物已推送"
           fi
-        shell: bash
