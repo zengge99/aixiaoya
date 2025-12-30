@@ -31,13 +31,15 @@ jobs:
       - name: 安装QEMU跨架构支持
         uses: docker/setup-qemu-action@v3
 
-      # ========== 核心修改：使用Docker容器进行跨架构打包 ==========
+      # ========== 核心修改：多阶段构建+仅导出指定文件 ==========
       - name: 跨架构打包（含ONNX导出）
         run: |
-          # 创建临时Dockerfile用于跨架构构建
-          cat > Dockerfile.${{ matrix.arch }} << 'EOF'
-          FROM python:3.12-slim
+          # 创建多阶段Dockerfile，仅保留需要的产物
+          cat > Dockerfile.${{ matrix.arch }} << EOF
+          # 第一阶段：构建阶段（完成编译、导出逻辑）
+          FROM python:3.12-slim AS builder
           WORKDIR /app
+          ARG ARCH
           # 安装基础依赖
           RUN apt-get update && apt-get install -y --no-install-recommends \
               gcc \
@@ -48,37 +50,47 @@ jobs:
           # 第一步：安装打包依赖并打包可执行文件
           RUN pip uninstall -y torch || true \
               && pip install --no-cache-dir onnxruntime pyinstaller \
-              && pyinstaller --onefile --name movie_extractor_${ARCH} --clean infer_onnx.py
+              && pyinstaller --onefile --name movie_extractor_\${ARCH} --clean infer_onnx.py
           # 第二步：安装导出依赖并导出ONNX
           RUN pip install --no-cache-dir torch tqdm numpy onnxscript \
               && python export_onnx.py
-          # 整理产物
-          RUN mkdir -p /app/release/${ARCH} \
-              && cp /app/dist/movie_extractor_${ARCH} /app/release/${ARCH}/ \
-              && cp /app/movie_extractor.onnx* /app/release/${ARCH}/ 2>/dev/null || true \
-              && cp /app/vocab.pkl /app/release/${ARCH}/ 2>/dev/null || true
+          # 整理产物到统一目录
+          RUN mkdir -p /app/release/\${ARCH} \
+              && cp /app/dist/movie_extractor_\${ARCH} /app/release/\${ARCH}/ || true \
+              && cp /app/movie_extractor.onnx* /app/release/\${ARCH}/ 2>/dev/null || true \
+              && cp /app/vocab.pkl /app/release/\${ARCH}/ 2>/dev/null || true
+
+          # 第二阶段：仅用于导出指定文件（空白镜像，最小化体积）
+          FROM scratch AS export-stage
+          ARG ARCH
+          # 只复制需要的产物，排除所有冗余内容
+          COPY --from=builder /app/release/\${ARCH}/movie_extractor_\${ARCH} /\${ARCH}/
+          COPY --from=builder /app/release/\${ARCH}/movie_extractor.onnx* /\${ARCH}/
+          COPY --from=builder /app/release/\${ARCH}/vocab.pkl /\${ARCH}/
           EOF
 
-          # 使用buildx构建跨架构镜像并导出产物
+          # 使用buildx构建并仅导出export-stage的指定文件
           docker buildx build \
             --platform ${{ matrix.platform }} \
             --build-arg ARCH=${{ matrix.arch }} \
             -f Dockerfile.${{ matrix.arch }} \
-            --output type=local,dest=./ \
+            --target export-stage \  # 仅构建导出阶段
+            --output type=local,dest=./release \  # 导出到release目录
             .
 
-          # 验证产物架构
+          # 验证产物是否存在
           if [ -f "release/${{ matrix.arch }}/movie_extractor_${{ matrix.arch }}" ]; then
-            echo "✅ 产物文件存在，验证架构："
+            echo "✅ ${{ matrix.arch }} 架构产物存在："
+            ls -l release/${{ matrix.arch }}/
             file release/${{ matrix.arch }}/movie_extractor_${{ matrix.arch }}
           else
-            echo "❌ 产物文件不存在"
+            echo "❌ ${{ matrix.arch }} 架构产物不存在"
             exit 1
           fi
         shell: bash
 
-      # ========== 上传原始产物 ==========
-      - name: 上传${{ matrix.arch }}架构原始产物
+      # ========== 上传仅包含指定文件的产物 ==========
+      - name: 上传${{ matrix.arch }}架构产物
         uses: actions/upload-artifact@v4
         with:
           name: movie_extractor_${{ matrix.arch }}_raw
