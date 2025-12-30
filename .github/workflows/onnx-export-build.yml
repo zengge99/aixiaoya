@@ -107,7 +107,7 @@ jobs:
           ls -l release/${{ matrix.arch }}/
         shell: bash
 
-      # ========== 上传原始产物（不再手动打包ZIP） ==========
+      # ========== 上传原始产物 ==========
       - name: 上传${{ matrix.arch }}架构原始产物
         uses: actions/upload-artifact@v4
         with:
@@ -127,38 +127,50 @@ jobs:
           fetch-depth: 0 # 必须：拉取完整提交历史
           persist-credentials: true # 保留凭证
 
-      - name: 创建最终release目录
-        run: mkdir -p release
+      - name: 创建临时目录和最终release目录
+        run: |
+          mkdir -p temp_artifacts release
         shell: bash
 
-      # ========== 下载各架构artifact（自动为ZIP包） ==========
-      - name: 下载amd64架构ZIP包
+      # ========== 下载各架构artifact并重新打包为单层ZIP ==========
+      - name: 下载amd64架构产物
         uses: actions/download-artifact@v4
         with:
           name: movie_extractor_amd64
-          path: ./
-          # 关键：指定文件名，避免默认的artifact目录
-        id: download-amd64
-      - name: 重命名amd64 ZIP包
-        run: mv movie_extractor_amd64.zip release/movie_extractor_amd64.zip
-        
-      - name: 下载arm64架构ZIP包
+          path: temp_artifacts/amd64
+          
+      - name: 打包amd64产物为单层ZIP
+        run: |
+          cd temp_artifacts/amd64
+          zip -r ../../release/movie_extractor_amd64.zip ./*
+          cd -
+          # 验证ZIP包
+          unzip -l release/movie_extractor_amd64.zip || echo "ZIP包验证失败"
+
+      - name: 下载arm64架构产物
         uses: actions/download-artifact@v4
         with:
           name: movie_extractor_arm64
-          path: ./
-        id: download-arm64
-      - name: 重命名arm64 ZIP包
-        run: mv movie_extractor_arm64.zip release/movie_extractor_arm64.zip
+          path: temp_artifacts/arm64
+          
+      - name: 打包arm64产物为单层ZIP
+        run: |
+          cd temp_artifacts/arm64
+          zip -r ../../release/movie_extractor_arm64.zip ./*
+          cd -
+          # 验证ZIP包
+          unzip -l release/movie_extractor_arm64.zip || echo "ZIP包验证失败"
 
       # ========== 验证文件 ==========
-      - name: 验证下载的ZIP包
+      - name: 验证最终ZIP包
         run: |
-          ls -l release/
-          # 可选：检查ZIP包内容，确认只有一层
+          ls -lh release/
+          echo "=== amd64 ZIP包内容 ==="
           unzip -l release/movie_extractor_amd64.zip
+          echo "=== arm64 ZIP包内容 ==="
+          unzip -l release/movie_extractor_arm64.zip
 
-      # ========== 推送合并后的产物到仓库（串行执行） ==========
+      # ========== 推送合并后的产物到仓库 ==========
       - name: 推送产物到仓库
         run: |
           # 配置git用户（CI环境需要）
