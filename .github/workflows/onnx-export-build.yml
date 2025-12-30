@@ -99,7 +99,6 @@ jobs:
           fi
           # 查看最终整理结果
           ls -l release/
-          ls -l release/${{ matrix.arch }}/
         shell: bash
 
       # ========== 推送产物到GitHub仓库 ==========
