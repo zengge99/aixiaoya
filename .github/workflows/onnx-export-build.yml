@@ -92,9 +92,9 @@ jobs:
           # 复制ONNX模型数据文件
           if [ -f "movie_extractor.onnx.data" ]; then
             cp movie_extractor.onnx.data release/${{ matrix.arch }}/
-            echo "✅ 已复制ONNX模型到release/${{ matrix.arch }}目录"
+            echo "✅ 已复制ONNX模型数据文件到release/${{ matrix.arch }}目录"
           else
-            echo "⚠️  ONNX模型不存在，跳过复制"
+            echo "⚠️  ONNX模型数据文件不存在，跳过复制"
           fi
           # 复制词表文件
           if [ -f "vocab.pkl" ]; then
@@ -107,34 +107,12 @@ jobs:
           ls -l release/${{ matrix.arch }}/
         shell: bash
 
-      # ========== 打包架构产物为ZIP压缩包 ==========
-      - name: 打包${{ matrix.arch }}产物为ZIP
-        run: |
-          # 打包当前架构的产物目录为ZIP
-          zip -r movie_extractor_${{ matrix.arch }}.zip release/${{ matrix.arch }}/
-          # 验证ZIP包
-          if [ -f "movie_extractor_${{ matrix.arch }}.zip" ]; then
-            echo "✅ ${{ matrix.arch }}架构ZIP包生成成功"
-            ls -lh movie_extractor_${{ matrix.arch }}.zip
-          else
-            echo "❌ ${{ matrix.arch }}架构ZIP包生成失败"
-            exit 1
-          fi
-        shell: bash
-
-      # ========== 上传原始产物和ZIP包 ==========
+      # ========== 上传原始产物（不再手动打包ZIP） ==========
       - name: 上传${{ matrix.arch }}架构原始产物
         uses: actions/upload-artifact@v4
         with:
-          name: movie_extractor_${{ matrix.arch }}_raw
+          name: movie_extractor_${{ matrix.arch }}
           path: release/${{ matrix.arch }}/
-          if-no-files-found: error
-
-      - name: 上传${{ matrix.arch }}架构ZIP包
-        uses: actions/upload-artifact@v4
-        with:
-          name: movie_extractor_${{ matrix.arch }}_zip
-          path: movie_extractor_${{ matrix.arch }}.zip
           if-no-files-found: error
 
   # ========== 第二阶段：串行合并产物并提交 ==========
@@ -153,31 +131,32 @@ jobs:
         run: mkdir -p release
         shell: bash
 
-      - name: 下载amd64架构原始产物
+      # ========== 下载各架构artifact（自动为ZIP包） ==========
+      - name: 下载amd64架构ZIP包
         uses: actions/download-artifact@v4
         with:
-          name: movie_extractor_amd64_raw
-          path: release/amd64
-
-      - name: 下载arm64架构原始产物
+          name: movie_extractor_amd64
+          path: ./
+          # 关键：指定文件名，避免默认的artifact目录
+        id: download-amd64
+      - name: 重命名amd64 ZIP包
+        run: mv movie_extractor_amd64.zip release/movie_extractor_amd64.zip
+        
+      - name: 下载arm64架构ZIP包
         uses: actions/download-artifact@v4
         with:
-          name: movie_extractor_arm64_raw
-          path: release/arm64
+          name: movie_extractor_arm64
+          path: ./
+        id: download-arm64
+      - name: 重命名arm64 ZIP包
+        run: mv movie_extractor_arm64.zip release/movie_extractor_arm64.zip
 
-      - name: 下载所有架构ZIP包到release目录
+      # ========== 验证文件 ==========
+      - name: 验证下载的ZIP包
         run: |
-          # 下载amd64 ZIP包
-          curl -s https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts \
-            | jq -r '.artifacts[] | select(.name == "movie_extractor_amd64_zip") | .archive_download_url' \
-            | xargs curl -s -L -H "Authorization: token ${{ github.token }}" -o release/movie_extractor_amd64.zip
-          # 下载arm64 ZIP包
-          curl -s https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts \
-            | jq -r '.artifacts[] | select(.name == "movie_extractor_arm64_zip") | .archive_download_url' \
-            | xargs curl -s -L -H "Authorization: token ${{ github.token }}" -o release/movie_extractor_arm64.zip
-          # 验证ZIP包
           ls -l release/
-        shell: bash
+          # 可选：检查ZIP包内容，确认只有一层
+          unzip -l release/movie_extractor_amd64.zip
 
       # ========== 推送合并后的产物到仓库（串行执行） ==========
       - name: 推送产物到仓库
