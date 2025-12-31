@@ -129,27 +129,20 @@ class Extractor(nn.Module):
         # 1. Embedding
         self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
         
-        # 2. CNN (提取局部 n-gram 特征)
+        # 2. CNN (提取局部 n-gram 特征，如 "The", "Man")
         self.conv1 = nn.Conv1d(in_channels=embed_dim, out_channels=embed_dim, kernel_size=3, padding=1)
         self.relu = nn.ReLU()
-        self.norm1 = nn.LayerNorm(embed_dim) 
+        self.norm1 = nn.LayerNorm(embed_dim) # 用于残差连接
         
-        # 3. BiGRU (增加 num_layers 并开启 dropout 时需注意导出稳定性)
-        self.gru = nn.GRU(
-            embed_dim, 
-            hidden_dim, 
-            bidirectional=True, 
-            batch_first=True, 
-            num_layers=2, 
-            dropout=0.5 if self.training else 0 # 导出模型前务必 model.eval()
-        )
+        # 3. BiGRU (提取序列长距离依赖)
+        self.gru = nn.GRU(embed_dim, hidden_dim, bidirectional=True, batch_first=True, num_layers=2, dropout=0.5)
         
         # 4. Attention (注意力机制)
         self.attention_linear = nn.Linear(hidden_dim * 2, 1)
         
         # 5. Output
         self.fc = nn.Sequential(
-            nn.Linear(hidden_dim * 4, 128),
+            nn.Linear(hidden_dim * 4, 128), # hidden*2(GRU) + hidden*2(Context)
             nn.ReLU(),
             nn.Dropout(0.5),
             nn.Linear(128, 1),
@@ -160,39 +153,34 @@ class Extractor(nn.Module):
         # x: [B, L]
         emb = self.embedding(x) # [B, L, E]
         
-        # CNN 处理 - 显式处理 Permute 逻辑
-        cnn_in = emb.transpose(1, 2) # [B, E, L]
+        # CNN 处理
+        cnn_in = emb.permute(0, 2, 1) # [B, E, L]
         cnn_out = self.conv1(cnn_in)
-        cnn_out = self.relu(cnn_out).transpose(1, 2) # [B, L, E]
+        cnn_out = self.relu(cnn_out).permute(0, 2, 1) # [B, L, E]
         
-        # 残差连接与规范化
+        # 残差连接：保留原始字符特征 + CNN提取的局部特征
         rnn_in = self.norm1(emb + cnn_out)
         
-        # GRU 处理 (显式接收并忽略 hidden state 更有利于 ONNX 静态图追踪)
-        self.gru.flatten_parameters() 
-        gru_out, _ = self.gru(rnn_in) # [B, L, H*2]
+        # GRU 处理
+        h0 = torch.zeros(2 * 2, x.size(0), self.gru.hidden_size).to(x.device)
+        gru_out, _ = self.gru(rnn_in, h0) 
+        #gru_out, _ = self.gru(rnn_in) # [B, L, H*2]
         
         # Attention 计算
-        # 使用 tanh 增加非线性，确保得分分布在 -1 到 1 之间，增强数值稳定性
         attn_scores = torch.tanh(self.attention_linear(gru_out)) # [B, L, 1]
-        attn_weights = F.softmax(attn_scores, dim=1) # [B, L, 1]
+        attn_weights = F.softmax(attn_scores, dim=1)
         
         # 上下文向量 (Context Vector)
         context = torch.sum(gru_out * attn_weights, dim=1) # [B, H*2]
         
-        # 优化：使用 expand 替代 repeat 以降低 ONNX 转换误差
-        # expand 不会复制内存，在 ONNX 中会转换为高效的 Broadcast 算子
-        batch_size, seq_len, _ = gru_out.shape
-        context_expanded = context.unsqueeze(1).expand(-1, seq_len, -1) # [B, L, H*2]
+        # 拼接：每个时间步都结合全局上下文
+        seq_len = gru_out.size(1)
+        context_expanded = context.unsqueeze(1).repeat(1, seq_len, 1) # [B, L, H*2]
         
-        # 拼接：[B, L, H*4]
-        combined = torch.cat([gru_out, context_expanded], dim=2) 
+        combined = torch.cat([gru_out, context_expanded], dim=2) # [B, L, H*4]
         
-        # 输出：[B, L]
-        # 注意：squeeze(-1) 在 batch 为 1 时可能导致维度塌陷，建议显式指定维度
-        out = self.fc(combined).view(batch_size, seq_len)
-        return out
-        
+        return self.fc(combined).squeeze(-1)
+
 # --- 标准加权交叉熵 Loss (比 Focal Loss 更稳健) ---
 class WeightedBCELoss(nn.Module):
     def __init__(self, pos_weight=4.0, reduction='mean'):

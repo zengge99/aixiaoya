@@ -18,7 +18,7 @@ def export_and_verify():
 
     # 2. 导出 ONNX
     dummy_input = torch.randint(0, len(char_to_idx), (1, MAX_LEN), dtype=torch.long)
-    torch.onnx.export(model, dummy_input, ONNX_PATH, opset_version=15,
+    torch.onnx.export(model, dummy_input, ONNX_PATH, opset_version=18,
                       input_names=["input_ids"], output_names=["probs"],
                       dynamic_axes={"input_ids": {0: "batch_size"}})
 
