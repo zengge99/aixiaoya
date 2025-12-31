@@ -1,0 +1,158 @@
+name: 导出ONNX并跨架构打包（容器内打包ZIP）
+on:
+  workflow_dispatch:
+
+jobs:
+  # ========== 第一阶段：公共构建（仅执行一次，提供 ONNX 和 Vocab） ==========
+  prepare-assets:
+    name: 准备公共 ONNX 产物
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python 环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 原生导出 ONNX
+        run: |
+          pip install --upgrade pip setuptools wheel
+          pip install --no-cache-dir --only-binary=all torch tqdm numpy onnxscript onnxruntime
+          python export_onnx.py
+          mkdir -p common_files
+          cp ./movie_extractor.onnx* ./common_files/ 2>/dev/null || true
+          cp ./vocab.pkl ./common_files/ 2>/dev/null || true
+
+      - name: 暂存公共产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: common-assets
+          path: common_files/
+          retention-days: 1
+
+  # ========== 第二阶段：各架构并行构建 + 容器内 ZIP 打包 ==========
+  build-cross-arch:
+    name: 构建 ${{ matrix.arch }} 架构
+    needs: prepare-assets
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+          - arch: arm64
+            platform: linux/arm64
+
+    steps:
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+
+      - name: 下载公共产物
+        uses: actions/download-artifact@v4
+        with:
+          name: common-assets
+          path: ./common_files
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 安装 QEMU 跨架构支持
+        uses: docker/setup-qemu-action@v3
+
+      - name: 容器内构建并打包 ZIP
+        run: |
+          cat > Dockerfile.${{ matrix.arch }} << EOF
+          # --- 构建阶段 ---
+          FROM python:3.12-slim AS builder
+          WORKDIR /app
+          ARG ARCH
+          
+          # 安装必要工具：gcc/g++用于PyInstaller，zip用于打包
+          RUN apt-get update && apt-get install -y --no-install-recommends \
+              gcc g++ zip && rm -rf /var/lib/apt/lists/*
+          
+          # 复制源码和公共产物
+          COPY . .
+          COPY ./common_files/* ./
+          
+          # 安装环境（直接用onnxruntime，跳过torch）
+          RUN pip install --no-cache-dir --only-binary=all onnxruntime pyinstaller
+          
+          # 1. 生成可执行文件
+          RUN pyinstaller --onefile --name movie_extractor_\${ARCH} --clean infer_onnx.py
+          
+          # 2. 整理目录结构并 ZIP 打包
+          # 创建 release/amd64 这样的结构
+          RUN mkdir -p /app/out/\${ARCH} && \
+              cp /app/dist/movie_extractor_\${ARCH} /app/out/\${ARCH}/ && \
+              cp /app/movie_extractor.onnx* /app/out/\${ARCH}/ 2>/dev/null || true && \
+              cp /app/vocab.pkl /app/out/\${ARCH}/ 2>/dev/null || true && \
+              cd /app/out && \
+              zip -r movie_extractor_\${ARCH}.zip \${ARCH}/
+
+          # --- 导出阶段 ---
+          FROM scratch AS export-stage
+          ARG ARCH
+          # 导出编译好的二进制目录和生成的 ZIP 文件
+          COPY --from=builder /app/out/ /
+          EOF
+
+          # 执行构建并输出到本地 release 目录
+          docker buildx build \
+            --platform ${{ matrix.platform }} \
+            --build-arg ARCH=${{ matrix.arch }} \
+            -f Dockerfile.${{ matrix.arch }} \
+            --target export-stage \
+            --output type=local,dest=./release \
+            --load \
+            .
+
+      - name: 上传构建结果
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifact-${{ matrix.arch }}
+          path: release/
+
+  # ========== 第三阶段：合并并提交到仓库 ==========
+  deploy:
+    name: 推送产物到仓库
+    runs-on: ubuntu-latest
+    needs: build-cross-arch
+    steps:
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 下载所有架构产物
+        uses: actions/download-artifact@v4
+        with:
+          path: temp_artifacts
+          pattern: artifact-*
+          merge-multiple: true
+
+      - name: 整理发布目录
+        run: |
+          mkdir -p release
+          # 将下载的所有文件（含文件夹和zip）移动到 release
+          cp -r temp_artifacts/* release/
+          echo "最终待提交文件列表："
+          ls -R release/
+
+      - name: 提交并推送到仓库
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          
+          # 确保 release 目录被加入 Git
+          git add release/
+          
+          if git diff --cached --quiet; then
+            echo "没有产物变更，跳过提交"
+          else
+            git commit -m "chore: 自动更新跨架构打包产物 (ZIP) $(date +%Y%m%d_%H%M%S)"
+            git push origin main
+          fi
