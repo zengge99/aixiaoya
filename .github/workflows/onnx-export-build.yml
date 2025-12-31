@@ -88,14 +88,14 @@ jobs:
           # 第一步：打包可执行文件（所有架构都执行）
           RUN pip uninstall -y torch || true \
               && pip install --no-cache-dir --only-binary=all onnxruntime pyinstaller \
-              && pyinstaller --onefile --name movie_extractor_\${ARCH} --clean infer_onnx.py
+              && pyinstaller --onefile --name movie_extractor --clean infer_onnx.py
 
           # 第二步：ONNX导出（仅amd64执行，arm64跳过）
           RUN \${EXPORT_ONNX_CMD}
 
           # 整理产物（提前创建好目录，避免导出阶段需要mkdir）
           RUN mkdir -p /app/release/\${ARCH} \
-              && cp /app/dist/movie_extractor_\${ARCH} /app/release/\${ARCH}/ || true \
+              && cp /app/dist/movie_extractor /app/release/\${ARCH}/ || true \
               && cp /app/movie_extractor.onnx* /app/release/\${ARCH}/ 2>/dev/null || true \
               && cp /app/vocab.pkl /app/release/\${ARCH}/ 2>/dev/null || true
 
@@ -123,8 +123,8 @@ jobs:
           if ls release/${{ matrix.arch }}/* 1> /dev/null 2>&1; then
             echo "✅ ${{ matrix.arch }} 架构产物存在："
             ls -l release/${{ matrix.arch }}/
-            if [ -f "release/${{ matrix.arch }}/movie_extractor_${{ matrix.arch }}" ]; then
-              file release/${{ matrix.arch }}/movie_extractor_${{ matrix.arch }}
+            if [ -f "release/${{ matrix.arch }}/movie_extractor" ]; then
+              file release/${{ matrix.arch }}/movie_extractor
             fi
           else
             echo "❌ ${{ matrix.arch }} 架构产物不存在"
