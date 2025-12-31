@@ -126,23 +126,21 @@ class Extractor(nn.Module):
     def __init__(self, vocab_size, embed_dim=128, hidden_dim=256):
         super().__init__()
         
-        # 1. Embedding
         self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
         
-        # 2. CNN (提取局部 n-gram 特征，如 "The", "Man")
         self.conv1 = nn.Conv1d(in_channels=embed_dim, out_channels=embed_dim, kernel_size=3, padding=1)
         self.relu = nn.ReLU()
-        self.norm1 = nn.LayerNorm(embed_dim) # 用于残差连接
+        self.norm1 = nn.LayerNorm(embed_dim)
         
-        # 3. BiGRU (提取序列长距离依赖)
-        self.gru = nn.GRU(embed_dim, hidden_dim, bidirectional=True, batch_first=True, num_layers=2, dropout=0.5)
+        # 将 GRU 替换为 LSTM
+        # bidirectional=True, num_layers=2 保持不变
+        self.lstm = nn.LSTM(embed_dim, hidden_dim, bidirectional=True, 
+                            batch_first=True, num_layers=2, dropout=0.5)
         
-        # 4. Attention (注意力机制)
         self.attention_linear = nn.Linear(hidden_dim * 2, 1)
         
-        # 5. Output
         self.fc = nn.Sequential(
-            nn.Linear(hidden_dim * 4, 128), # hidden*2(GRU) + hidden*2(Context)
+            nn.Linear(hidden_dim * 4, 128),
             nn.ReLU(),
             nn.Dropout(0.5),
             nn.Linear(128, 1),
@@ -150,32 +148,35 @@ class Extractor(nn.Module):
         )
 
     def forward(self, x):
-        # x: [B, L]
-        emb = self.embedding(x) # [B, L, E]
+        emb = self.embedding(x)
         
-        # CNN 处理
-        cnn_in = emb.permute(0, 2, 1) # [B, E, L]
+        cnn_in = emb.permute(0, 2, 1)
         cnn_out = self.conv1(cnn_in)
-        cnn_out = self.relu(cnn_out).permute(0, 2, 1) # [B, L, E]
+        cnn_out = self.relu(cnn_out).permute(0, 2, 1)
         
-        # 残差连接：保留原始字符特征 + CNN提取的局部特征
         rnn_in = self.norm1(emb + cnn_out)
         
-        # GRU 处理
-        gru_out, _ = self.gru(rnn_in) # [B, L, H*2]
+        # --- LSTM 处理 ---
+        # 显式初始化 h0 和 c0 (LSTM 多了一个 cell state)
+        # 维度: (num_layers * num_directions, batch, hidden_size)
+        h0 = torch.zeros(2 * 2, x.size(0), self.lstm.hidden_size).to(x.device)
+        c0 = torch.zeros(2 * 2, x.size(0), self.lstm.hidden_size).to(x.device)
         
-        # Attention 计算
-        attn_scores = torch.tanh(self.attention_linear(gru_out)) # [B, L, 1]
+        # LSTM 返回的是 (output, (h_n, c_n))
+        lstm_out, _ = self.lstm(rnn_in, (h0, c0)) 
+        # lstm_out: [B, L, H*2]
+        
+        # --- 后续 Attention 逻辑 (无需修改) ---
+        attn_scores = torch.tanh(self.attention_linear(lstm_out))
         attn_weights = F.softmax(attn_scores, dim=1)
         
-        # 上下文向量 (Context Vector)
-        context = torch.sum(gru_out * attn_weights, dim=1) # [B, H*2]
+        context = torch.sum(lstm_out * attn_weights, dim=1)
         
-        # 拼接：每个时间步都结合全局上下文
-        seq_len = gru_out.size(1)
-        context_expanded = context.unsqueeze(1).repeat(1, seq_len, 1) # [B, L, H*2]
+        seq_len = lstm_out.size(1)
+        # 建议这里使用 expand 而不是 repeat，对 ONNX 更友好
+        context_expanded = context.unsqueeze(1).expand(-1, seq_len, -1)
         
-        combined = torch.cat([gru_out, context_expanded], dim=2) # [B, L, H*4]
+        combined = torch.cat([lstm_out, context_expanded], dim=2)
         
         return self.fc(combined).squeeze(-1)
 
