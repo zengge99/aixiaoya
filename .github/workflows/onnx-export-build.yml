@@ -156,7 +156,8 @@ jobs:
         run: |
           mkdir -p release
           echo "原始目录内容："
-          ls -l release
+          ls -l release/amd64
+          ls -l release/arm64
         shell: bash
 
       - name: 下载amd64架构产物
@@ -175,7 +176,8 @@ jobs:
         run: |
           mkdir -p release
           echo "新目录内容："
-          ls -l release
+          ls -l release/amd64
+          ls -l release/arm64
           cd release
           rm amd64/movie_extractor_amd64 2>/dev/null || true
           rm arm64/movie_extractor_arm64 2>/dev/null || true
