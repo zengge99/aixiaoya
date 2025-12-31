@@ -1,7 +1,7 @@
 import torch
 import pickle
 import os
-from main_opt import Extractor MODEL_PATH VOCAB_PATH MAX_LEN EMBED_DIM HIDDEN_DIM
+from main import Extractor MODEL_PATH VOCAB_PATH MAX_LEN EMBED_DIM HIDDEN_DIM
 
 def export_onnx():
     # 加载词表和 PyTorch 模型
