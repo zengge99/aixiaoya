@@ -1,7 +1,7 @@
 import torch
 import pickle
 import os
-from main import Extractor  # 替换为你的 main.py 文件名
+from main_opt import Extractor  # 替换为你的 main.py 文件名
 
 # 全局配置（和 main.py 保持一致）
 MODEL_PATH = "movie_model.pth"
