@@ -3,7 +3,7 @@ import pickle
 import os
 import numpy as np
 import onnxruntime as ort
-from main_opt import Extractor MODEL_PATH VOCAB_PATH MAX_LEN EMBED_DIM HIDDEN_DIM
+from main_opt import Extractor, MODEL_PATH, VOCAB_PATH, MAX_LEN, EMBED_DIM, HIDDEN_DIM
 
 # 配置保持一致
 MODEL_PATH = "movie_model.pth"
