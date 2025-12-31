@@ -1,0 +1,167 @@
+name: 导出ONNX并跨架构打包（容器内生成AppImage）
+on:
+  workflow_dispatch:
+
+jobs:
+  # ========== 第一阶段：公共构建（导出 ONNX） ==========
+  prepare-assets:
+    name: 准备公共 ONNX 产物
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python 环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 原生导出 ONNX
+        run: |
+          pip install --upgrade pip setuptools wheel
+          pip install --no-cache-dir --only-binary=all torch tqdm numpy onnxscript onnxruntime
+          python export_onnx.py
+          mkdir -p common_files
+          cp ./movie_extractor.onnx* ./common_files/ 2>/dev/null || true
+          cp ./vocab.pkl ./common_files/ 2>/dev/null || true
+
+      - name: 暂存公共产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: common-assets
+          path: common_files/
+          retention-days: 1
+
+  # ========== 第二阶段：并行构建各架构 AppImage ==========
+  build-cross-arch:
+    name: 构建 ${{ matrix.arch }} AppImage
+    needs: prepare-assets
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            appimg_arch: x86_64
+          - arch: arm64
+            platform: linux/arm64
+            appimg_arch: aarch64
+
+    steps:
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+
+      - name: 下载公共产物
+        uses: actions/download-artifact@v4
+        with:
+          name: common-assets
+          path: ./common_files
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 安装 QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: 容器内构建并封装 AppImage
+        run: |
+          cat > Dockerfile.${{ matrix.arch }} << EOF
+          # --- 构建阶段 ---
+          FROM python:3.12-slim AS builder
+          WORKDIR /app
+          ARG ARCH
+          ARG APPIMG_ARCH
+          
+          # 安装必要工具：binutils(strip用), wget(下工具), file/libglib2.0(appimagetool依赖)
+          RUN apt-get update && apt-get install -y --no-install-recommends \
+              gcc g++ wget file libglib2.0-0 binutils && rm -rf /var/lib/apt/lists/*
+          
+          # 1. 下载对应架构的 appimagetool
+          RUN wget https://github.com/AppImage/AppImageKit/releases/download/13/appimagetool-\${APPIMG_ARCH}.AppImage -O /usr/bin/appimagetool && \
+              chmod +x /usr/bin/appimagetool
+          
+          # 2. 准备源码和公共产物
+          COPY . .
+          COPY ./common_files/* ./
+          
+          # 3. 生成可执行文件
+          RUN pip install --no-cache-dir --only-binary=all onnxruntime pyinstaller && \
+              pyinstaller --onefile --name movie_extractor --clean infer_onnx.py
+          
+          # 4. 组装 AppDir 结构
+          RUN mkdir -p /app/AppDir/usr/bin && \
+              cp /app/dist/movie_extractor /app/AppDir/usr/bin/ && \
+              cp /app/movie_extractor.onnx* /app/AppDir/usr/bin/ 2>/dev/null || true && \
+              cp /app/vocab.pkl /app/AppDir/usr/bin/ 2>/dev/null || true
+
+          # 5. 创建 AppRun 启动脚本
+          RUN printf '#!/bin/sh\nHERE="\$(dirname "\$(readlink -f "\${0}")")"\nexec "\${HERE}/usr/bin/movie_extractor" "\$@"' > /app/AppDir/AppRun && \
+              chmod +x /app/AppDir/AppRun
+
+          # 6. 创建必要的元数据文件
+          RUN printf '[Desktop Entry]\nName=Movie Extractor\nExec=movie_extractor\nIcon=movie_extractor\nType=Application\nCategories=Utility;' > /app/AppDir/movie_extractor.desktop && \
+              touch /app/AppDir/movie_extractor.png
+
+          # 7. 打包为 AppImage (核心：使用 --appimage-extract-and-run 跳过 FUSE)
+          ENV ARCH=\${APPIMG_ARCH}
+          RUN /usr/bin/appimagetool --appimage-extract-and-run /app/AppDir /app/Movie_Extractor-\${APPIMG_ARCH}.AppImage
+
+          # --- 导出阶段 ---
+          FROM scratch AS export-stage
+          ARG APPIMG_ARCH
+          COPY --from=builder /app/Movie_Extractor-\${APPIMG_ARCH}.AppImage /
+          EOF
+
+          # 执行构建
+          docker buildx build \
+            --platform ${{ matrix.platform }} \
+            --build-arg ARCH=${{ matrix.arch }} \
+            --build-arg APPIMG_ARCH=${{ matrix.appimg_arch }} \
+            -f Dockerfile.${{ matrix.arch }} \
+            --target export-stage \
+            --output type=local,dest=./release \
+            --load \
+            .
+
+      - name: 上传 AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: appimage-${{ matrix.arch }}
+          path: release/
+
+  # ========== 第三阶段：提交到仓库 ==========
+  deploy:
+    name: 推送 AppImage 到仓库
+    runs-on: ubuntu-latest
+    needs: build-cross-arch
+    steps:
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 下载所有 AppImage
+        uses: actions/download-artifact@v4
+        with:
+          path: temp_artifacts
+          pattern: appimage-*
+          merge-multiple: true
+
+      - name: 整理发布目录
+        run: |
+          mkdir -p release
+          cp temp_artifacts/*.AppImage release/
+          ls -lh release/
+
+      - name: 提交并推送到仓库
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add release/
+          if git diff --cached --quiet; then
+            echo "无变更"
+          else
+            git commit -m "chore: 更新跨架构 AppImage 产物 $(date +%Y%m%d_%H%M%S)"
+            git push origin main
+          fi
