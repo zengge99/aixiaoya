@@ -179,8 +179,8 @@ jobs:
           ls -l release/amd64
           ls -l release/arm64
           cd release
-          rm amd64/movie_extractor_amd64 2>/dev/null || true
-          rm arm64/movie_extractor_arm64 2>/dev/null || true
+          rm -f amd64/movie_extractor_amd64 2>/dev/null || true
+          rm -f arm64/movie_extractor_arm64 2>/dev/null || true
           zip -r movie_extractor_amd64.zip amd64/
           cp amd64/movie_extractor.onnx* arm64/
           cp amd64/vocab.pkl arm64/
