@@ -41,7 +41,7 @@ jobs:
           # 在GitHub Actions原生amd64环境导出ONNX（比容器内快，且只执行一次）
           sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-pip
           pip install --upgrade pip setuptools wheel
-          pip install --no-cache-dir --only-binary=all torch tqdm numpy onnxscript
+          pip install --no-cache-dir --only-binary=all torch tqdm numpy onnxscript onnxruntime
           python export_onnx.py
           # 保存ONNX文件到固定目录，供后续构建复用
           mkdir -p ./common_files
@@ -200,4 +200,5 @@ jobs:
             git push origin main
             echo "✅ 产物已推送到仓库release目录"
           fi
+
         shell: bash
