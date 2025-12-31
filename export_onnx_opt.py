@@ -5,18 +5,14 @@ import numpy as np
 import onnxruntime as ort
 from main_opt import Extractor, MODEL_PATH, VOCAB_PATH, MAX_LEN, EMBED_DIM, HIDDEN_DIM
 
-# 配置保持一致
-MODEL_PATH = "movie_model.pth"
-VOCAB_PATH = "vocab.pkl"
 ONNX_PATH = "movie_extractor.onnx"
-MAX_LEN = 300
 
 def export_and_verify():
     # 1. 加载模型
     with open(VOCAB_PATH, 'rb') as f:
         char_to_idx = pickle.load(f)
     
-    model = Extractor(len(char_to_idx), embed_dim=64, hidden_dim=128)
+    model = Extractor(len(char_to_idx), embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM)
     model.load_state_dict(torch.load(MODEL_PATH, map_location='cpu'))
     model.eval()
 
