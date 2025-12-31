@@ -80,7 +80,7 @@ jobs:
       - name: 验证并上传
         run: |
           ls -R ./release/${{ matrix.arch }}
-          file ./release/${{ matrix.arch }/movie_extractor_${{ matrix.arch }}
+          file ./release/${{ matrix.arch }}/movie_extractor_${{ matrix.arch }}
         shell: bash
 
       - name: 上传单架构产物
