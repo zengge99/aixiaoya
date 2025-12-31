@@ -1,14 +1,7 @@
 import torch
 import pickle
 import os
-from main_opt import Extractor  # 替换为你的 main.py 文件名
-
-# 全局配置（和 main.py 保持一致）
-MODEL_PATH = "movie_model.pth"
-VOCAB_PATH = "vocab.pkl"
-MAX_LEN = 300
-EMBED_DIM = 64
-HIDDEN_DIM = 128
+from main_opt import Extractor MODEL_PATH VOCAB_PATH MAX_LEN EMBED_DIM HIDDEN_DIM
 
 def export_onnx():
     # 加载词表和 PyTorch 模型
