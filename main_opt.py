@@ -135,7 +135,9 @@ class Extractor(nn.Module):
         self.norm1 = nn.LayerNorm(embed_dim) # 用于残差连接
         
         # 3. BiGRU (提取序列长距离依赖)
-        self.gru = nn.GRU(embed_dim, hidden_dim, bidirectional=True, batch_first=True, num_layers=2, dropout=0.5)
+        self.gru1 = nn.GRU(embed_dim, hidden_dim, bidirectional=True, batch_first=True)
+        self.gru2 = nn.GRU(hidden_dim * 2, hidden_dim, bidirectional=True, batch_first=True)
+        self.dropout_rnn = nn.Dropout(0.5)
         
         # 4. Attention (注意力机制)
         self.attention_linear = nn.Linear(hidden_dim * 2, 1)
@@ -162,9 +164,12 @@ class Extractor(nn.Module):
         rnn_in = self.norm1(emb + cnn_out)
         
         # GRU 处理
-        h0 = torch.zeros(2 * 2, x.size(0), self.gru.hidden_size).to(x.device)
-        gru_out, _ = self.gru(rnn_in, h0) 
-        #gru_out, _ = self.gru(rnn_in) # [B, L, H*2]
+        h0_1 = torch.zeros(2, x.size(0), self.gru1.hidden_size).to(x.device)
+        gru_out1, _ = self.gru1(rnn_in, h0_1)
+        gru_out1 = self.dropout_rnn(gru_out1) # 手动加 Dropout
+        
+        h0_2 = torch.zeros(2, x.size(0), self.gru2.hidden_size).to(x.device)
+        gru_out, _ = self.gru2(gru_out1, h0_2)
         
         # Attention 计算
         attn_scores = torch.tanh(self.attention_linear(gru_out)) # [B, L, 1]
