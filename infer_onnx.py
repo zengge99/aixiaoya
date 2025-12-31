@@ -87,19 +87,40 @@ class TextUtils:
         
         return processed_result
 
+def get_resource_path(relative_path):
+    # 1. 检查当前工作目录或绝对路径是否存在
+    if os.path.exists(relative_path):
+        return relative_path
+
+    # 2. 如果是打包环境，检查 PyInstaller 内部路径
+    if hasattr(sys, '_MEIPASS'):
+        bundle_path = os.path.join(sys._MEIPASS, relative_path)
+        if os.path.exists(bundle_path):
+            return bundle_path
+            
+    # 3. 检查可执行文件同级目录
+    exe_dir_path = os.path.join(os.path.dirname(sys.executable), relative_path)
+    if os.path.exists(exe_dir_path):
+        return exe_dir_path
+
+    return relative_path
+
 # --- ONNX 初始化函数（仅执行1次） ---
 def init_onnx_session():
-    if not os.path.exists(ONNX_MODEL_PATH) or not os.path.exists(VOCAB_PATH):
+    actual_onnx_path = get_resource_path(ONNX_MODEL_PATH)
+    actual_vocab_path = get_resource_path(VOCAB_PATH)
+
+    if not os.path.exists(actual_onnx_path) or not os.path.exists(actual_vocab_path):
         print(f"❌ 缺失文件：需 {ONNX_MODEL_PATH} 和 {VOCAB_PATH} 在同目录")
         return None, None
     
     # 加载词表
-    with open(VOCAB_PATH, 'rb') as f:
+    with open(actual_vocab_path, 'rb') as f:
         char_to_idx = pickle.load(f)
     
     # 加载 ONNX 模型（CPU 推理，无 GPU 依赖）
     sess = ort.InferenceSession(
-        ONNX_MODEL_PATH,
+        actual_onnx_path,
         providers=["CPUExecutionProvider"],
         sess_options=ort.SessionOptions()
     )
