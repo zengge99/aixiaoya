@@ -123,79 +123,69 @@ class TextUtils:
 
 # --- 模型结构 (CNN + BiGRU + Attention) ---
 class Extractor(nn.Module):
-    def __init__(self, vocab_size, embed_dim=128, hidden_dim=256):
+    def __init__(self, vocab_size, embed_dim=64, hidden_dim=128):
         super().__init__()
         
-        # 1. Embedding
+        # 1. 轻量化 Embedding
         self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
         
-        # 2. CNN (保留原有结构作为局部特征提取)
-        self.conv1 = nn.Conv1d(in_channels=embed_dim, out_channels=embed_dim, kernel_size=3, padding=1)
-        self.relu = nn.ReLU()
+        # 2. 高效 CNN 层
+        # 在 CPU 上，保持 embed_dim 较小能显著提升卷积速度
+        self.conv1 = nn.Conv1d(embed_dim, embed_dim, kernel_size=3, padding=1)
         self.norm1 = nn.LayerNorm(embed_dim)
         
-        # 3. Transformer Encoder (替代 BiGRU)
-        # 为了保持后续维度一致，d_model 设为 hidden_dim * 2
-        # nhead 设为 8 (确保 2*hidden_dim 能被 8 整除，256*2 / 8 = 64)
-        transformer_dim = hidden_dim * 2
+        # 3. 单层高效 Transformer Encoder
+        # 对于大多数提取任务，1层 Transformer + CNN 已经足够捕捉全局依赖
+        self.feature_map = nn.Linear(embed_dim, hidden_dim)
+        
         encoder_layer = nn.TransformerEncoderLayer(
-            d_model=transformer_dim,
-            nhead=8,
-            dim_feedforward=transformer_dim * 2,
+            d_model=hidden_dim,
+            nhead=4, # 减少 head 数量以降低注意力矩阵的切分开销
+            dim_feedforward=hidden_dim * 2, # 缩小前馈网络宽度
             batch_first=True,
             dropout=0.1,
             activation='gelu'
         )
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=2)
+        # 优化点：使用 1 层，并关闭不必要的 norm 检查
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=1)
         
-        # 用于将 embed_dim 映射到 transformer_dim 的线性层
-        self.feature_map = nn.Linear(embed_dim, transformer_dim)
+        # 4. 简化 Attention 聚合
+        self.attention_linear = nn.Linear(hidden_dim, 1)
         
-        # 4. Attention (命名和维度保持不变)
-        self.attention_linear = nn.Linear(transformer_dim, 1)
-        
-        # 5. Output (结构和维度保持不变)
+        # 5. 轻量化分类头
         self.fc = nn.Sequential(
-            nn.Linear(transformer_dim * 2, 128),
+            nn.Linear(hidden_dim * 2, 64), # 减小到 64
             nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(128, 1),
+            nn.Linear(64, 1),
             nn.Sigmoid()
         )
 
     def forward(self, x):
-        # 1. Embedding
+        # 尽量使用原地操作 (inplace) 和 连续内存 (contiguous) 来提速
         emb = self.embedding(x)
         
-        # 2. CNN 局部特征提取
+        # CNN
         cnn_in = emb.transpose(1, 2)
-        cnn_out = self.conv1(cnn_in)
-        cnn_out = self.relu(cnn_out).transpose(1, 2)
+        cnn_out = F.relu(self.conv1(cnn_in)).transpose(1, 2)
         
-        # 3. 残差连接与归一化
-        res = torch.add(emb, cnn_out) 
-        norm_out = self.norm1(res)
+        # 简单的加法残差，避免复杂的计算图
+        x_feat = self.norm1(emb + cnn_out)
         
-        # 4. 映射到 Transformer 维度并进入 Encoder
-        # Transformer 处理
-        trans_in = self.feature_map(norm_out)
-        gru_out = self.transformer_encoder(trans_in) # 变量名保持 gru_out 兼容老代码逻辑
+        # Transformer
+        x_feat = self.feature_map(x_feat)
+        # PyTorch 2.x 会在此处自动尝试调用高效的 SDPA (Scaled Dot Product Attention)
+        feat = self.transformer_encoder(x_feat)
         
-        # 5. Attention 机制
-        attn_scores = torch.tanh(self.attention_linear(gru_out))
-        attn_weights = F.softmax(attn_scores, dim=1) 
+        # Attention 聚合
+        attn_weights = F.softmax(torch.tanh(self.attention_linear(feat)), dim=1)
+        context = torch.bmm(attn_weights.transpose(1, 2), feat)
         
-        # 6. Context (全局特征)
-        context = torch.bmm(attn_weights.transpose(1, 2), gru_out) 
+        # 融合与输出
+        # 使用 expand 而非 repeat 在 PT 训练阶段更快（节省显存/内存拷贝）
+        context_res = context.expand(-1, feat.size(1), -1)
+        combined = torch.cat([feat, context_res], dim=2)
         
-        # 7. Combine
-        # 使用 repeat 替代 expand 以提高 ONNX 导出在某些旧版本 CPU 上的稳定性
-        context_expanded = context.repeat(1, gru_out.size(1), 1)
-        combined = torch.cat([gru_out, context_expanded], dim=2)
-        
-        # 8. Final Output
-        out = self.fc(combined) 
-        return out.view(-1, x.size(1)) # 返回 [Batch, SeqLen]
+        return self.fc(combined).squeeze(-1)
 
 # --- 标准加权交叉熵 Loss (比 Focal Loss 更稳健) ---
 class WeightedBCELoss(nn.Module):
