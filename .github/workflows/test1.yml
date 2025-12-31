@@ -1,4 +1,4 @@
-name: 导出ONNX并跨架构打包（容器内生成AppImage）
+name: 导出ONNX并跨架构打包（AppImage修正版）
 on:
   workflow_dispatch:
 
@@ -73,12 +73,15 @@ jobs:
           ARG ARCH
           ARG APPIMG_ARCH
           
-          # 安装必要工具：binutils(strip用), wget(下工具), file/libglib2.0(appimagetool依赖)
+          # 安装必要工具
+          # libfuse2: AppImage 基础依赖
+          # ca-certificates: 解决 wget 下载 https 的证书问题
           RUN apt-get update && apt-get install -y --no-install-recommends \
-              gcc g++ wget file libglib2.0-0 binutils && rm -rf /var/lib/apt/lists/*
+              gcc g++ wget file libglib2.0-0 binutils ca-certificates libfuse2 && \
+              rm -rf /var/lib/apt/lists/*
           
-          # 1. 下载对应架构的 appimagetool
-          RUN wget https://github.com/AppImage/AppImageKit/releases/download/13/appimagetool-\${APPIMG_ARCH}.AppImage -O /usr/bin/appimagetool && \
+          # 1. 下载对应架构的 appimagetool (改用 continuous 标签，支持 aarch64)
+          RUN wget https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-\${APPIMG_ARCH}.AppImage -O /usr/bin/appimagetool && \
               chmod +x /usr/bin/appimagetool
           
           # 2. 准备源码和公共产物
@@ -103,7 +106,8 @@ jobs:
           RUN printf '[Desktop Entry]\nName=Movie Extractor\nExec=movie_extractor\nIcon=movie_extractor\nType=Application\nCategories=Utility;' > /app/AppDir/movie_extractor.desktop && \
               touch /app/AppDir/movie_extractor.png
 
-          # 7. 打包为 AppImage (核心：使用 --appimage-extract-and-run 跳过 FUSE)
+          # 7. 打包为 AppImage
+          # 使用 --appimage-extract-and-run 绕过容器内无法挂载 FUSE 的问题
           ENV ARCH=\${APPIMG_ARCH}
           RUN /usr/bin/appimagetool --appimage-extract-and-run /app/AppDir /app/Movie_Extractor-\${APPIMG_ARCH}.AppImage
 
