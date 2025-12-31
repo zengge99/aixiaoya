@@ -1,4 +1,4 @@
-name: 导出ONNX并跨架构打包（推送到仓库）
+name: zip打包
 on:
   workflow_dispatch:
 

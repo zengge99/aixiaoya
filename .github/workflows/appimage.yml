@@ -1,4 +1,4 @@
-name: 导出ONNX并跨架构打包（AppImage修正版）
+name: AppImage打包
 on:
   workflow_dispatch:
 
