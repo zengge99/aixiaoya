@@ -70,7 +70,7 @@ jobs:
           WORKDIR /app
           RUN apt-get update && apt-get install -y --no-install-recommends gcc g++ && rm -rf /var/lib/apt/lists/*
           RUN pip install --upgrade pip
-          RUN pip install --no-cache-dir onnxruntime pyinstaller
+          RUN pip install --no-cache-dir onnxruntime flask pyinstaller
           
           COPY . .
           COPY ./common_files/* . 
