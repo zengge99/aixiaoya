@@ -71,7 +71,7 @@ class TextUtils:
             return TextUtils.CN_NUMS[num // 10] + "十" + TextUtils.CN_NUMS[num % 10]
 
     @staticmethod
-    def fix_name(path, ai_result):
+    def fix_name_(path, ai_result):
         # 判断是否为全英文（包含字母、空格、数字、常见标点，无中文字符）
         if ai_result and all(ord(c) < 128 for c in ai_result):
             return ai_result
@@ -118,10 +118,12 @@ class TextUtils:
                 if suffix not in processed_result:
                     return f"{processed_result} {suffix}"
                 break 
-
-        processed_result = processed_result.replace("第一季", "", 1).strip()
         
         return processed_result
+
+    @staticmethod
+    def fix_name(result):
+        return result.replace("第一季", "", 1).strip()
 
 # --- 模型结构 (CNN + BiGRU + Attention) ---
 class Extractor(nn.Module):
