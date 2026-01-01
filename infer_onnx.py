@@ -84,6 +84,8 @@ class TextUtils:
                 if suffix not in processed_result:
                     return f"{processed_result} {suffix}"
                 break 
+                
+        processed_result = processed_result.replace("第一季", "", 1).strip()
         
         return processed_result
 
