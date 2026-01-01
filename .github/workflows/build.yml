@@ -123,7 +123,7 @@ jobs:
       - name: 安装依赖
         run: |
           pip install --upgrade pip
-          pip install --no-cache-dir onnxruntime pyinstaller
+          pip install --no-cache-dir onnxruntime flask pyinstaller
 
       - name: PyInstaller 打包
         run: |
