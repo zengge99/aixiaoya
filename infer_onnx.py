@@ -3,16 +3,17 @@ import pickle
 import re
 import sys
 import os
-import string
+import argparse
+from flask import Flask, request, jsonify
 
-# --- 全局配置（和 main.py 一致） ---
+# --- 全局配置 ---
 MAX_LEN = 300
 THRESHOLD = 0.35
 VOCAB_PATH = "vocab.pkl"
 ONNX_MODEL_PATH = "movie_extractor.onnx"
 DEBUG_MODE = os.path.exists("dbg")
 
-# --- 必需工具类 TextUtils（从 main.py 复制） ---
+# --- 必需工具类 TextUtils ---
 class TextUtils:
     CN_NUMS = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]
 
@@ -38,7 +39,6 @@ class TextUtils:
 
     @staticmethod
     def fix_name_internal(path, ai_result):
-        # 新增：全英文直接返回
         if ai_result and all(ord(c) < 128 for c in ai_result):
             return ai_result
 
@@ -92,24 +92,18 @@ class TextUtils:
         return TextUtils.fix_name_internal(path, ai_result).replace("第一季", "", 1).strip()
 
 def get_resource_path(relative_path):
-    # 1. 检查当前工作目录或绝对路径是否存在
     if os.path.exists(relative_path):
         return relative_path
-
-    # 2. 如果是打包环境，检查 PyInstaller 内部路径
     if hasattr(sys, '_MEIPASS'):
         bundle_path = os.path.join(sys._MEIPASS, relative_path)
         if os.path.exists(bundle_path):
             return bundle_path
-            
-    # 3. 检查可执行文件同级目录
     exe_dir_path = os.path.join(os.path.dirname(sys.executable), relative_path)
     if os.path.exists(exe_dir_path):
         return exe_dir_path
-
     return relative_path
 
-# --- ONNX 初始化函数（仅执行1次） ---
+# --- ONNX 初始化 ---
 def init_onnx_session():
     actual_onnx_path = get_resource_path(ONNX_MODEL_PATH)
     actual_vocab_path = get_resource_path(VOCAB_PATH)
@@ -118,11 +112,9 @@ def init_onnx_session():
         print(f"❌ 缺失文件：需 {ONNX_MODEL_PATH} 和 {VOCAB_PATH} 在同目录")
         return None, None
     
-    # 加载词表
     with open(actual_vocab_path, 'rb') as f:
         char_to_idx = pickle.load(f)
     
-    # 加载 ONNX 模型（CPU 推理，无 GPU 依赖）
     sess = ort.InferenceSession(
         actual_onnx_path,
         providers=["CPUExecutionProvider"],
@@ -130,21 +122,17 @@ def init_onnx_session():
     )
     return sess, char_to_idx
 
-# --- 单条路径预测函数 ---
-def predict_single_path(path, sess, char_to_idx):
+# --- 核心推理逻辑提取 ---
+def do_inference(path, sess, char_to_idx):
     if '#' in path:
-        print(path)
-        return
+        return "" # 原逻辑中碰到#号直接返回空或打印原路径
     
-    # 输入预处理
     input_ids = [char_to_idx.get(c.lower(), 1) for c in path[:MAX_LEN]]
     padded = input_ids + [0] * (MAX_LEN - len(input_ids))
-    padded = [padded]  # 构造 batch 维度 [1, MAX_LEN]
+    padded = [padded]
 
-    # ONNX Runtime 推理（无梯度，速度快）
     outputs = sess.run(["probs"], {"input_ids": padded})
-    probs = outputs[0][0][:len(path)]  # 截断到原始路径长度
-
+    probs = outputs[0][0][:len(path)]
     if DEBUG_MODE:
         print(f"\n{'='*65}")
         print(f"{'索引':<4} | {'字符':<4} | {'分值':<15} | 状态")
@@ -153,16 +141,11 @@ def predict_single_path(path, sess, char_to_idx):
             status = "✅ [选中]" if p > THRESHOLD else "   [排除]"
             print(f"{i:<4} | {path[i]:<4} | {p:.10f} | {status}")
         print(f"{'='*65}\n")
-
-    # --- 后处理逻辑（和 main.py 完全一致） ---
     selected_mask = [False] * len(probs)
-    
-    # 1. 阈值筛选
     for i, p in enumerate(probs):
         if p > THRESHOLD:
             selected_mask[i] = True
             
-    # 2. 空洞填补
     gap_limit = 2 
     for i in range(len(probs)):
         if selected_mask[i]:
@@ -173,33 +156,32 @@ def predict_single_path(path, sess, char_to_idx):
                             selected_mask[k] = True
                     break
 
-    # 结果拼接
     res_list = [path[i] for i, is_sel in enumerate(selected_mask) if is_sel]
     raw_result = "".join(res_list)
     clean_result = raw_result.replace('.', ' ').replace('_', ' ')
     clean_result = re.sub(r'\s+', ' ', clean_result)
     clean_result = clean_result.strip("/()# “”.-")
 
-    # 验证连续性
     if clean_result:
         escaped_clean = re.escape(clean_result)
         verify_pattern = escaped_clean.replace(r'\ ', r'[._\s\-\(\)\[\]]*')
         if not re.search(verify_pattern, path, re.IGNORECASE):
             clean_result = ""
 
-    # 混合模式修复
     if clean_result:
         clean_result = TextUtils.fix_name(path, clean_result)
-
-    # 输出结果
-    print(f"{path}#{clean_result}" if clean_result else f"{path}")
-
-# --- 批量预测函数 ---
-def run_batch_predict(file_path):
-    sess, char_to_idx = init_onnx_session()
-    if not sess:
-        return
     
+    return clean_result
+
+# --- 预测动作封装 ---
+def predict_single_path(path, sess, char_to_idx):
+    res = do_inference(path, sess, char_to_idx)
+    if res:
+        print(f"{path}#{res}")
+    else:
+        print(f"{path}")
+
+def run_batch_predict(file_path, sess, char_to_idx):
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             lines = [line.strip() for line in f.readlines() if line.strip()]
@@ -207,24 +189,47 @@ def run_batch_predict(file_path):
         print(f"读取文件失败: {e}")
         return
     
-    total_lines = len(lines)
-    for idx, line in enumerate(lines):
+    for line in lines:
         predict_single_path(line, sess, char_to_idx)
+
+# --- HTTP 服务模式 ---
+def start_server(port, sess, char_to_idx):
+    app = Flask(__name__)
+
+    @app.route('/')
+    def api_extract():
+        q = request.args.get('q', '')
+        if not q:
+            return jsonify({"error": "missing parameter q"}), 400
+        result = do_inference(q, sess, char_to_idx)
+        return result  # 直接返回提取出的字符串
+
+    print(f"🚀 HTTP 服务已启动: http://0.0.0.0:{port}")
+    print(f"📌 使用示例: http://127.0.0.1:{port}/?q=你的影片路径")
+    app.run(host='0.0.0.0', port=port, debug=False)
 
 # --- 入口控制 ---
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="电影名称提取工具")
+    parser.add_argument("input", nargs="?", help="影片路径字符串 或 路径列表文件(.txt)")
+    parser.add_argument("--srv", type=int, help="启动 HTTP 服务模式，指定端口号")
 
-    if len(sys.argv) > 1:
-        input_arg = sys.argv[1]
-        # 批量预测：输入是文件路径
-        if os.path.exists(input_arg) and os.path.isfile(input_arg):
-            run_batch_predict(input_arg)
-        # 单条预测：输入是路径字符串
+    args = parser.parse_args()
+
+    # 初始化模型
+    sess, char_to_idx = init_onnx_session()
+    if not sess:
+        sys.exit(1)
+
+    # 优先判断是否启动服务
+    if args.srv:
+        start_server(args.srv, sess, char_to_idx)
+    
+    # 其次判断是否有输入路径进行单条或批量预测
+    elif args.input:
+        if os.path.exists(args.input) and os.path.isfile(args.input):
+            run_batch_predict(args.input, sess, char_to_idx)
         else:
-            sess, char_to_idx = init_onnx_session()
-            if sess:
-                predict_single_path(input_arg, sess, char_to_idx)
+            predict_single_path(args.input, sess, char_to_idx)
     else:
-        print("用法:")
-        print("  单条预测: python infer_onnx.py \"你的文件路径\"")
-        print("  批量预测: python infer_onnx.py 路径文件.txt")
+        parser.print_help()
