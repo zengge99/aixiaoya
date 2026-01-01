@@ -1,4 +1,4 @@
-name: 单文件二进制打包（含win）
+name: 单文件二进制打包（多平台兼容版）
 on:
   workflow_dispatch:
 
@@ -21,7 +21,7 @@ jobs:
         run: |
           python export_onnx.py
           mkdir -p ./common_files
-          # 检查文件是否存在并拷贝
+          # 拷贝模型和词表，使用通配符确保 movie_extractor.onnx.data 也能拷进去
           cp movie_extractor.onnx* ./common_files/
           cp vocab.pkl ./common_files/
 
@@ -32,7 +32,7 @@ jobs:
           path: ./common_files/
           retention-days: 1
 
-  # ========== 第二阶段：Linux 跨架构打包 ==========
+  # ========== 第二阶段：Linux 跨架构打包 (高兼容性) ==========
   build-linux:
     name: 构建 Linux ${{ matrix.arch }}
     runs-on: ubuntu-latest
@@ -65,12 +65,17 @@ jobs:
       - name: Docker 容器内打包
         run: |
           cat > Dockerfile.${{ matrix.arch }} << EOF
-          FROM python:3.12-slim AS builder
+          # 使用 Bullseye (Debian 11) 以确保较低的 GLIBC 版本，兼容旧版 Armbian/Ubuntu
+          FROM python:3.10-slim-bullseye AS builder
           WORKDIR /app
           RUN apt-get update && apt-get install -y --no-install-recommends gcc g++ && rm -rf /var/lib/apt/lists/*
+          RUN pip install --upgrade pip
           RUN pip install --no-cache-dir onnxruntime pyinstaller
+          
           COPY . .
           COPY ./common_files/* . 
+
+          # 打包命令
           RUN pyinstaller --onefile --clean \
               --name movie_extractor_linux_${{ matrix.arch }} \
               --add-data "movie_extractor.onnx:." \
@@ -95,7 +100,7 @@ jobs:
           name: binary_linux_${{ matrix.arch }}
           path: output/movie_extractor_linux_${{ matrix.arch }}
 
-  # ========== 第三阶段：Windows 打包 (新增) ==========
+  # ========== 第三阶段：Windows 打包 ==========
   build-windows:
     name: 构建 Windows amd64
     runs-on: windows-latest
@@ -122,9 +127,9 @@ jobs:
 
       - name: PyInstaller 打包
         run: |
-          # 注意：Windows 下使用分号 ; 分隔路径
-          # 我们把 common_files 里的文件拷贝到当前目录方便打包
+          # 拷贝模型到当前目录以方便打包
           copy common_files\* .
+          # Windows 使用分号分隔
           pyinstaller --onefile --clean `
             --name movie_extractor_win_amd64 `
             --add-data "movie_extractor.onnx;." `
@@ -138,7 +143,7 @@ jobs:
           name: binary_win_amd64
           path: dist/movie_extractor_win_amd64.exe
 
-  # ========== 第四阶段：汇总并推送到仓库 ==========
+  # ========== 第四阶段：整理并推送到仓库 ==========
   deploy:
     name: 推送产物
     runs-on: ubuntu-latest
@@ -149,20 +154,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: 清理并创建 release 目录
+      - name: 清理旧 release 目录
         run: |
           rm -rf release/
           mkdir -p release/
 
-      - name: 下载所有产物
+      - name: 下载所有构建产物
         uses: actions/download-artifact@v4
         with:
           pattern: binary_*
           path: release/
           merge-multiple: true
-
-      - name: 检查产物列表
-        run: ls -R release/
 
       - name: 推送产物
         run: |
@@ -173,6 +175,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "⚠️ 没有文件变化"
           else
-            git commit -m "chore: 更新多平台二进制产物 $(date +%Y%m%d_%H%M%S)"
+            git commit -m "chore: 更新多平台单文件二进制 $(date +%Y%m%d_%H%M%S)"
             git push origin main
           fi
