@@ -121,9 +121,8 @@ class TextUtils:
         
         return processed_result
 
-    @staticmethod
-    def fix_name(result):
-        return result.replace("第一季", "", 1).strip()
+    def fix_name(path, ai_result):
+        return fix_name_(path, ai_result).replace("第一季", "", 1).strip()
 
 # --- 模型结构 (CNN + BiGRU + Attention) ---
 class Extractor(nn.Module):

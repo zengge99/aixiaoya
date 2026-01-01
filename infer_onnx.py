@@ -88,8 +88,8 @@ class TextUtils:
         return processed_result
 
     @staticmethod
-    def fix_name(result):
-        return result.replace("第一季", "", 1).strip()
+    def fix_name(path, ai_result):
+        return fix_name_(path, ai_result).replace("第一季", "", 1).strip()
 
 def get_resource_path(relative_path):
     # 1. 检查当前工作目录或绝对路径是否存在
