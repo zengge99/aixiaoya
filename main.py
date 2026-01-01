@@ -123,7 +123,7 @@ class TextUtils:
 
     @staticmethod
     def fix_name(path, ai_result):
-        return fix_name_internal(path, ai_result).replace("第一季", "", 1).strip()
+        return TextUtils.fix_name_internal(path, ai_result).replace("第一季", "", 1).strip()
 
 # --- 模型结构 (CNN + BiGRU + Attention) ---
 class Extractor(nn.Module):
