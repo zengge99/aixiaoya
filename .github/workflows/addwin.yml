@@ -1,0 +1,178 @@
+name: 单文件二进制打包（含win）
+on:
+  workflow_dispatch:
+
+jobs:
+  # ========== 第一阶段：导出 ONNX (公共资源) ==========
+  prepare-assets:
+    name: 导出公共模型资源
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装导出环境
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-pip
+          pip install --upgrade pip setuptools wheel
+          pip install --no-cache-dir --only-binary=all torch tqdm numpy onnxscript onnxruntime
+
+      - name: 执行导出脚本
+        run: |
+          python export_onnx.py
+          mkdir -p ./common_files
+          # 检查文件是否存在并拷贝
+          cp movie_extractor.onnx* ./common_files/
+          cp vocab.pkl ./common_files/
+
+      - name: 上传临时资源
+        uses: actions/upload-artifact@v4
+        with:
+          name: common-assets
+          path: ./common_files/
+          retention-days: 1
+
+  # ========== 第二阶段：Linux 跨架构打包 ==========
+  build-linux:
+    name: 构建 Linux ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    needs: prepare-assets
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+          - arch: arm64
+            platform: linux/arm64
+
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 下载公共模型资源
+        uses: actions/download-artifact@v4
+        with:
+          name: common-assets
+          path: ./common_files
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 安装 QEMU 支持
+        uses: docker/setup-qemu-action@v3
+
+      - name: Docker 容器内打包
+        run: |
+          cat > Dockerfile.${{ matrix.arch }} << EOF
+          FROM python:3.12-slim AS builder
+          WORKDIR /app
+          RUN apt-get update && apt-get install -y --no-install-recommends gcc g++ && rm -rf /var/lib/apt/lists/*
+          RUN pip install --no-cache-dir onnxruntime pyinstaller
+          COPY . .
+          COPY ./common_files/* . 
+          RUN pyinstaller --onefile --clean \
+              --name movie_extractor_linux_${{ matrix.arch }} \
+              --add-data "movie_extractor.onnx:." \
+              --add-data "movie_extractor.onnx.data:." \
+              --add-data "vocab.pkl:." \
+              infer_onnx.py
+
+          FROM scratch AS export-stage
+          COPY --from=builder /app/dist/movie_extractor_linux_${{ matrix.arch }} /output/
+          EOF
+
+          docker buildx build \
+            --platform ${{ matrix.platform }} \
+            -f Dockerfile.${{ matrix.arch }} \
+            --target export-stage \
+            --output type=local,dest=. \
+            --load .
+
+      - name: 上传 Linux 二进制
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary_linux_${{ matrix.arch }}
+          path: output/movie_extractor_linux_${{ matrix.arch }}
+
+  # ========== 第三阶段：Windows 打包 (新增) ==========
+  build-windows:
+    name: 构建 Windows amd64
+    runs-on: windows-latest
+    needs: prepare-assets
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 下载公共模型资源
+        uses: actions/download-artifact@v4
+        with:
+          name: common-assets
+          path: common_files
+
+      - name: 安装依赖
+        run: |
+          pip install --upgrade pip
+          pip install --no-cache-dir onnxruntime pyinstaller
+
+      - name: PyInstaller 打包
+        run: |
+          # 注意：Windows 下使用分号 ; 分隔路径
+          # 我们把 common_files 里的文件拷贝到当前目录方便打包
+          copy common_files\* .
+          pyinstaller --onefile --clean `
+            --name movie_extractor_win_amd64 `
+            --add-data "movie_extractor.onnx;." `
+            --add-data "movie_extractor.onnx.data;." `
+            --add-data "vocab.pkl;." `
+            infer_onnx.py
+
+      - name: 上传 Windows 二进制
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary_win_amd64
+          path: dist/movie_extractor_win_amd64.exe
+
+  # ========== 第四阶段：汇总并推送到仓库 ==========
+  deploy:
+    name: 推送产物
+    runs-on: ubuntu-latest
+    needs: [build-linux, build-windows]
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 清理并创建 release 目录
+        run: |
+          rm -rf release/
+          mkdir -p release/
+
+      - name: 下载所有产物
+        uses: actions/download-artifact@v4
+        with:
+          pattern: binary_*
+          path: release/
+          merge-multiple: true
+
+      - name: 检查产物列表
+        run: ls -R release/
+
+      - name: 推送产物
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          
+          git add release/
+          if git diff --cached --quiet; then
+            echo "⚠️ 没有文件变化"
+          else
+            git commit -m "chore: 更新多平台二进制产物 $(date +%Y%m%d_%H%M%S)"
+            git push origin main
+          fi
