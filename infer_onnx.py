@@ -37,7 +37,7 @@ class TextUtils:
             return TextUtils.CN_NUMS[num // 10] + "十" + TextUtils.CN_NUMS[num % 10]
 
     @staticmethod
-    def fix_name_(path, ai_result):
+    def fix_name_internal(path, ai_result):
         # 新增：全英文直接返回
         if ai_result and all(ord(c) < 128 for c in ai_result):
             return ai_result
@@ -89,7 +89,7 @@ class TextUtils:
 
     @staticmethod
     def fix_name(path, ai_result):
-        return fix_name_(path, ai_result).replace("第一季", "", 1).strip()
+        return fix_name_internal(path, ai_result).replace("第一季", "", 1).strip()
 
 def get_resource_path(relative_path):
     # 1. 检查当前工作目录或绝对路径是否存在
