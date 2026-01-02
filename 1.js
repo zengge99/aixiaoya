@@ -1148,7 +1148,12 @@ class TextUtils {
 async function getDoubanInfo(id) {
   try {
     const url = `https://movie.douban.com/subject/${id}/`;
-    const response = await fetch(url);
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://www.douban.com/'
+      }
+    });
     const html = await response.text();
 
     // 使用正则表达式解析HTML内容
@@ -1203,18 +1208,20 @@ async function getDoubanInfo(id) {
 }
 
 async function handle(q) {
-  let name = TextUtils.getNameFromPath(q).name;
-  keyword = name;
-  const url = "https://www.douban.com/search?cat=1002&q=" + encodeURIComponent(name);
+  keyword = await fetch("http://aixiaoya.zngle.cf/?q=" + encodeURIComponent(q))
+    .then(res => res.ok ? res.text() : "")
+    .then(text => text.trim())
+    .catch(() => "");
+  if (!keyword) keyword = TextUtils.getNameFromPath(q).name;
+
+  const url = "https://www.douban.com/search?cat=1002&q=" + encodeURIComponent(keyword);
   const response = await fetch(url, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       'Referer': 'https://www.douban.com/'
     }
   });
-  let htmlRaw = await response.text();
-  let result = parseDoubanData(htmlRaw);
-  
+  let result = parseDoubanData(await response.text());
   const promises = result.map(async (item) => {
     let info = {};
     if (item.id) {
