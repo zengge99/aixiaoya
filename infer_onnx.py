@@ -193,7 +193,7 @@ def run_batch_predict(file_path, sess, char_to_idx):
         predict_single_path(line, sess, char_to_idx)
 
 # --- HTTP 服务模式 ---
-def start_server(port, sess, char_to_idx):
+def start_server(port):
     app = Flask(__name__)
 
     @app.route('/')
@@ -201,6 +201,7 @@ def start_server(port, sess, char_to_idx):
         q = request.args.get('q', '')
         if not q:
             return jsonify({"error": "missing parameter q"}), 400
+        sess, char_to_idx = init_onnx_session()
         result = do_inference(q, sess, char_to_idx)
         return result  # 直接返回提取出的字符串
 
@@ -223,7 +224,7 @@ if __name__ == "__main__":
 
     # 优先判断是否启动服务
     if args.srv:
-        start_server(args.srv, sess, char_to_idx)
+        start_server(args.srv)
     
     # 其次判断是否有输入路径进行单条或批量预测
     elif args.input:
