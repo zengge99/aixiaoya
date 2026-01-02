@@ -72,7 +72,7 @@ function parseDoubanData(htmlRaw) {
         id = parseInt(id);
 
         // --- 提取海报链接 ---
-        const posterMatch = block.match(/<img src="(https:\/\/img[^"]+\.jpg)"/);
+        const posterMatch = block.match(/<img src="(https:\/\/img[^"]+\.webp)"/);
         const img = posterMatch ? posterMatch[1] : "";
 
         // --- 提取影片名 ---
@@ -1461,8 +1461,20 @@ async function handleRequest(request) {
 
   keyword = name;
   const url = "https://www.douban.com/search?cat=1002&q=" + encodeURIComponent(name);
-  const response = await fetch(url);
-  let result = parseDoubanData(await response.text());
+  let newUrl = new URL(url)
+  let method = request.method
+  let request_headers = request.headers
+  let new_request_headers = new Headers(request_headers)
+
+  let newReq = new Request(newUrl, {
+    method: method,
+    headers: new_request_headers,
+  });
+
+  const response = await fetchOverTcp(newReq);
+  let htmlRaw = await response.text();
+  console.log("xxxxxxxxxxxx", htmlRaw);
+  let result = parseDoubanData(htmlRaw);
   
   const promises = result.map(async (item) => {
     let info = {};
