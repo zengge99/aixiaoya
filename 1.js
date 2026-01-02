@@ -1236,14 +1236,6 @@ async function handle(q) {
   return result;
 }
 
-addEventListener("fetch", (event) => {
-	event.respondWith(
-		handleRequest(event.request).catch(
-			(err) => new Response(err.stack, { status: 500 })
-		)
-	);
-});
-
 let keyword = "";
 async function handleRequest(request) {
   let orgUrl = new URL(request.url);
@@ -1261,3 +1253,11 @@ async function handleRequest(request) {
   let result = await handle(process.argv[2]);
   console.log(JSON.stringify(result, null, 2));
 })();
+
+addEventListener("fetch", (event) => {
+	event.respondWith(
+		handleRequest(event.request).catch(
+			(err) => new Response(err.stack, { status: 500 })
+		)
+	);
+});
