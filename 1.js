@@ -1,5 +1,3 @@
-import { connect } from 'cloudflare:sockets';
-
 export default {
   async fetch(request, env, ctx) {
     return handleRequest(request);
@@ -11,50 +9,6 @@ function cfLog(...vars) {
   if (isInCf) {
     console.log(...vars);
   }
-}
-
-async function transformHTMLtoJSON(html, filters) {
-  //return html;
-  let stack = [];
-  let output = {};
-  stack.push(output);
-  class HTMLTransformer {
-    element(el) {
-      let curTag = el.tagName;
-      let cur = stack[stack.length - 1];
-      if (!cur[curTag]) {
-        cur[curTag] = [];
-      }
-      let jsonEl = {};
-      cur.fullpath = cur.fullpath || "";
-      jsonEl.fullpath = cur.fullpath + "/" + el.tagName;
-      [...el.attributes].map(([k, v]) => jsonEl[k] = v);
-      stack.push(jsonEl);
-      cur[curTag].push(jsonEl);
-      try {
-        el.onEndTag(endTag => {
-          stack.pop();
-        });
-      } catch {
-        stack.pop();
-      }
-    }
-    text(text) {
-      let cur = stack[stack.length - 1];
-      if (!cur['text_content']) {
-        cur['text_content'] = '';
-      }
-      cur['text_content'] += '\n' + text.text;
-      cur['text_content'] = cur['text_content'].replace(/\n+/g, '\n').trim();
-    }
-  }
-  let parser = new HTMLRewriter();
-  filters.forEach(element => {
-    parser = parser.on(element, new HTMLTransformer());
-  });
-
-  await parser.transform(new Response(html)).text();
-  return output;
 }
 
 function parseDoubanData(htmlRaw) {
@@ -72,8 +26,8 @@ function parseDoubanData(htmlRaw) {
         id = parseInt(id);
 
         // --- 提取海报链接 ---
-        const posterMatch = block.match(/<img src="(https:\/\/img[^"]+\.webp)"/);
-        const img = posterMatch ? posterMatch[1] : "";
+        const posterMatch = block.match(/<img src="(https:\/\/img[^"]+\.(jpe?g|webp))"/);
+        const img = posterMatch ? posterMatch[1] : null;
 
         // --- 提取影片名 ---
         const titleMatch = block.match(/onclick="[^"]+" >([^<]+)<\/a>/);
@@ -96,7 +50,7 @@ function parseDoubanData(htmlRaw) {
 
         // --- 解析年份 (文本行最后的 4 位数字) ---
         const yearMatch = castLine.match(/(\d{4})$/);
-        const year = yearMatch ? yearMatch[1] : "未知";
+        const year = yearMatch ? yearMatch[1] : "";
 
         // --- 解析原名 ---
         let originalName = name;
@@ -107,15 +61,23 @@ function parseDoubanData(htmlRaw) {
             }
         }
 
+        let similarity = TextUtils.similarity(keyword, name);
+        let similarity1 = TextUtils.similarity(keyword, originalName);
+        similarity = similarity1 > similarity ? similarity1 : similarity;
+
         return {
             id,
             name,
+            originalName,
             rate,
             img,
-            originalName,
+            similarity,
             year
         };
-    }).filter(m => m.id);
+    }).filter(m => m.id && m.img);
+
+    movies.sort((a, b) => b.similarity - a.similarity);
+    movies.push({ keyword: keyword });
 
     return movies;
 }
@@ -781,7 +743,7 @@ class TextUtils {
   }
 
   static removeEnglish(str) {
-    if (/^[a-zA-Z!"#$%&'()*+,\-./:;<=>?@[\]^_`{|}~]+$/.test(str)) {
+    if (/^[a-zA-Z\d\s!"#$%&'()*+,\-./:;<=>?@[\]^_`{|}~]+$/.test(str)) {
       return str; // 如果字符串是纯英文，则直接返回
     } else {
       return str
@@ -1189,176 +1151,6 @@ class TextUtils {
   }
 }
 
-async function fetchOverTcp(request) {
-  let url = new URL(request.url);
-  let req = new Request(url, request);
-  let port_string = url.port;
-  if (!port_string) {
-    port_string = url.protocol === "http:" ? "80" : "443";
-  }
-  let port = parseInt(port_string);
-
-  /*
-  if ((url.protocol === "https:" && port === 443) || (url.protocol === "http:" && port === 80)) {
-    // CF标准的反代不支持IP地址，所以IPV6要走TCP代理
-    if (!isIP(url.host)) {
-      return await fetch(req);
-    }
-  }
-  */
-
-  // 创建 TCP 连接
-  let tcpSocket = connect({
-    hostname: url.hostname,
-    port: port,
-  }, JSON.parse('{"secureTransport": "starttls"}'));
-
-  if (url.protocol === "https:") {
-    tcpSocket = tcpSocket.startTls();
-  }
-
-  try {
-    const writer = tcpSocket.writable.getWriter();
-
-    // 构造请求头部
-    let headersString = '';
-    let bodyString = '';
-
-    for (let [name, value] of req.headers) {
-      //if (name !== "accept-encoding" && name !== "host") {
-      if (name === "user-agent" || name === "accept") {
-        headersString += `${name}: ${value}\r\n`;
-      }
-
-    }
-    headersString += `connection: close\r\n`;
-    headersString += `accept-encoding: identity\r\n`;
-    headersString += `host: ${url.hostname}\r\n`
-
-    let fullpath = url.pathname;
-
-    // 如果有查询参数，将其添加到路径
-    if (url.search) {
-      fullpath += url.search.replace(/%3F/g, "?");
-    }
-
-    const body = await req.text();
-    bodyString = `${body}`;
-
-    let reqText = `${req.method} ${fullpath} HTTP/1.1\r\n${headersString}\r\n${bodyString}\r\n`;
-    console.log("Raw Request", reqText);
-    let reqBuff = new TextEncoder().encode(reqText);
-
-
-    //return new Response(reqBuff);
-
-    // 发送请求
-    await writer.write(reqBuff);
-    writer.releaseLock();
-
-    // 获取响应
-    const response = await constructHttpResponse(tcpSocket);
-
-    console.log("fetchOverTcp response headers", JSON.parse(JSON.stringify(Object.fromEntries(Array.from(response.headers.entries())))));
-
-    return response;
-  } catch (error) {
-    console.log("fetchOverTcp Exception", error);
-    tcpSocket.close();
-    return new Response(error.stack, { status: 500 });
-  }
-}
-
-async function constructHttpResponse(tcpSocket, timeout) {
-  const reader = tcpSocket.readable.getReader();
-  let remainingData = new Uint8Array(0);
-  try {
-    // 读取响应数据
-    while (true) {
-      const { value, done } = await reader.read();
-      const newData = new Uint8Array(remainingData.length + value.length);
-      newData.set(remainingData);
-      newData.set(value, remainingData.length);
-      remainingData = newData;
-      const index = indexOfDoubleCRLF(remainingData);
-      if (index !== -1) {
-        reader.releaseLock();
-        const headerBytes = remainingData.subarray(0, index);
-        const bodyBytes = remainingData.subarray(index + 4);
-
-        const header = new TextDecoder().decode(headerBytes);
-        const [statusLine, ...headers] = header.split('\r\n');
-        const [httpVersion, statusCode, ...tmpStatusText] = statusLine.split(' ');
-        let statusText = tmpStatusText.join(' ');
-
-        // 构造 Response 对象
-        let responseHeaders = JSON.parse('{}');
-        headers.forEach((header) => {
-          const [name, value] = header.split(': ');
-          responseHeaders[name.toLowerCase()] = value;
-        });
-
-        responseHeaders = JSON.parse(JSON.stringify(responseHeaders));
-        console.log("orginal responseHeaders", responseHeaders);
-
-        const responseInit = {
-          status: parseInt(statusCode),
-          statusText,
-          headers: new Headers(responseHeaders),
-        };
-
-        console.log("statusCode", statusCode);
-
-        let readable = null;
-        let writable = null;
-        let stream = null;
-        if (responseHeaders["content-length"]) {
-          stream = new FixedLengthStream(parseInt(responseHeaders["content-length"]));
-        } else {
-          stream = new TransformStream();
-        }
-        readable = stream.readable;
-        writable = stream.writable;
-
-        //规避CF问题，延迟1ms执行
-        function delayedExecution() {
-          setTimeout(() => {
-            let writer = writable.getWriter();
-            writer.write(bodyBytes);
-            writer.releaseLock();
-            tcpSocket.readable.pipeTo(writable);
-          }, 1);
-        }
-        delayedExecution();
-
-        return new Response(readable, responseInit);
-      }
-      if (done) {
-        tcpSocket.close();
-        break;
-      }
-    }
-
-    console.log("Response Done!");
-    return new Response();
-  } catch (error) {
-    console.log("Construct Response Exception", error);
-    tcpSocket.close();
-  }
-}
-
-function indexOfDoubleCRLF(data) {
-  if (data.length < 4) {
-    return -1;
-  }
-  for (let i = 0; i < data.length - 3; i++) {
-    if (data[i] === 13 && data[i + 1] === 10 && data[i + 2] === 13 && data[i + 3] === 10) {
-      return i;
-    }
-  }
-  return -1;
-}
-
 async function getDoubanInfo(id) {
   try {
     const url = `https://movie.douban.com/subject/${id}/`;
@@ -1416,64 +1208,17 @@ async function getDoubanInfo(id) {
   }
 }
 
-let keyword = "";
-async function handleRequest(request) {
-  let orgUrl = new URL(request.url);
-  if (orgUrl.pathname.startsWith("/search")) {
-    //let googUrl = 'https://www.google.com.hk/search?q=' + orgUrl.searchParams.get('q') + '&num=100';
-    //let googUrl = 'https://www.google.com.hk/search' + orgUrl.search;
-    let googUrl = 'https://www.bing.com/search' + orgUrl.search + "&mkt=zh-CN";
-    //let googUrl = 'https://www.bing.com/search' + orgUrl.search; 
-    let newUrl = new URL(googUrl)
-    let method = request.method
-    let request_headers = request.headers
-    let new_request_headers = new Headers(request_headers)
-
-    //new_request_headers.set('Host', "www.google.com.hk")
-    //new_request_headers.set('Referer', "https://www.google.com.hk")
-
-    let newReq = new Request(newUrl, {
-      method: method,
-      headers: new_request_headers,
-    });
-    let original_response = await fetchOverTcp(newReq);
-
-    return original_response;
-  } else if (orgUrl.pathname.startsWith("/doubaninfo")) {
-    try {
-      // 调用豆瓣信息获取函数
-      const params = orgUrl.searchParams;
-      const id = params.get('id');
-      const info = await getDoubanInfo(id);
-      return new Response(JSON.stringify(info, null, 2), {
-        headers: { 'Content-Type': 'application/json' }
-      });
-    } catch (error) {
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-  }
-
-  keyword = decodeURIComponent(orgUrl.searchParams.get('q'));
-  let name = TextUtils.getNameFromPath(keyword).name;
-
+async function handle(q) {
+  let name = TextUtils.getNameFromPath(q).name;
   keyword = name;
   const url = "https://www.douban.com/search?cat=1002&q=" + encodeURIComponent(name);
-  let newUrl = new URL(url)
-  let method = request.method
-  let request_headers = request.headers
-  let new_request_headers = new Headers(request_headers)
-
-  let newReq = new Request(newUrl, {
-    method: method,
-    headers: new_request_headers,
+  const response = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Referer': 'https://www.douban.com/'
+    }
   });
-
-  const response = await fetchOverTcp(newReq);
   let htmlRaw = await response.text();
-  console.log("xxxxxxxxxxxx", htmlRaw);
   let result = parseDoubanData(htmlRaw);
   
   const promises = result.map(async (item) => {
@@ -1494,25 +1239,21 @@ async function handleRequest(request) {
   });
   
   result = await Promise.all(promises);
-
-  return new Response(JSON.stringify(result, null, 2));
-}
-
-function parsePath(items) {
-  let result = [];
-  let parts = items.split('^');
-  parts.forEach(element => {
-    result.push(TextUtils.getNameFromPath(element));
-  });
   return result;
 }
 
+let keyword = "";
+async function handleRequest(request) {
+  let orgUrl = new URL(request.url);
+  keyword = decodeURIComponent(orgUrl.searchParams.get('q'));
+  let result = await handle(keyword);
+  return new Response(JSON.stringify(result, null, 2));
+}
+
 (async () => {
-  /*
   if (typeof addEventListener === "function") {
     return
   }
-  */
   //For Nodejs, to resuse some js API
   isInCf = false;
   let act = "";
