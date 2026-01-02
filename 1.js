@@ -1,9 +1,3 @@
-export default {
-  async fetch(request, env, ctx) {
-    return handleRequest(request);
-  },
-};
-
 let isInCf = true;
 function cfLog(...vars) {
   if (isInCf) {
@@ -1242,6 +1236,14 @@ async function handle(q) {
   return result;
 }
 
+addEventListener("fetch", (event) => {
+	event.respondWith(
+		handleRequest(event.request).catch(
+			(err) => new Response(err.stack, { status: 500 })
+		)
+	);
+});
+
 let keyword = "";
 async function handleRequest(request) {
   let orgUrl = new URL(request.url);
@@ -1256,8 +1258,6 @@ async function handleRequest(request) {
   }
   //For Nodejs, to resuse some js API
   isInCf = false;
-  let act = "";
-  eval('act = process.argv[2]');
-  let result = eval(act);
+  let result = await handle(process.argv[2]);
   console.log(JSON.stringify(result, null, 2));
 })();
