@@ -203,6 +203,7 @@ def start_server(port):
             return jsonify({"error": "missing parameter q"}), 400
         sess, char_to_idx = init_onnx_session()
         result = do_inference(q, sess, char_to_idx)
+        print(f"{result}")
         return result  # 直接返回提取出的字符串
 
     print(f"🚀 HTTP 服务已启动: http://0.0.0.0:{port}")
