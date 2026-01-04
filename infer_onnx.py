@@ -19,37 +19,37 @@ class TextUtils:
 
     @staticmethod
     def cn_to_arabic(cn_str):
-    """将中文数字（一到九十九）转换为字符串格式的阿拉伯数字"""
-    cn_num_map = {'零':0, '一':1, '二':2, '三':3, '四':4, '五':5, '六':6, '七':7, '八':8, '九':9}
-    
-    # 如果本身就是阿拉伯数字，直接返回
-    if cn_str.isdigit():
-        return cn_str
-    
-    # 处理逻辑
-    if cn_str == "十":
-        return "10"
-    
-    res = 0
-    if "十" in cn_str:
-        parts = cn_str.split("十")
-        # 处理 "二十..." 或 "十..."
-        # 如果 "十" 在开头（如十一），前部分为空
-        prefix = parts[0]
-        suffix = parts[1]
+        """将中文数字（一到九十九）转换为字符串格式的阿拉伯数字"""
+        cn_num_map = {'零':0, '一':1, '二':2, '三':3, '四':4, '五':5, '六':6, '七':7, '八':8, '九':9}
         
-        if prefix: # 二十...
-            res += cn_num_map[prefix] * 10
-        else: # 十...
-            res += 10
+        # 如果本身就是阿拉伯数字，直接返回
+        if cn_str.isdigit():
+            return cn_str
+        
+        # 处理逻辑
+        if cn_str == "十":
+            return "10"
+        
+        res = 0
+        if "十" in cn_str:
+            parts = cn_str.split("十")
+            # 处理 "二十..." 或 "十..."
+            # 如果 "十" 在开头（如十一），前部分为空
+            prefix = parts[0]
+            suffix = parts[1]
             
-        if suffix: # ...十一
-            res += cn_num_map[suffix]
-    else:
-        # 仅有个位数
-        res = cn_num_map.get(cn_str, cn_str)
-        
-    return str(res)
+            if prefix: # 二十...
+                res += cn_num_map[prefix] * 10
+            else: # 十...
+                res += 10
+                
+            if suffix: # ...十一
+                res += cn_num_map[suffix]
+        else:
+            # 仅有个位数
+            res = cn_num_map.get(cn_str, cn_str)
+            
+        return str(res)
 
     @staticmethod
     def simplify_season_name(text):
