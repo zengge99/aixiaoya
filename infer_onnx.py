@@ -104,6 +104,13 @@ class TextUtils:
 
         replaced_flag = False 
 
+        replace_patterns = [
+            r'Season\s*(\d{1,2})',              
+            r'SE(\d{1,2})',                     
+            r'(?<![a-zA-Z])S(\d{1,2})(?![a-zA-Z])', 
+            r'第(\d{1,2})季'                    
+        ]
+
         def replace_func(match):
             nonlocal replaced_flag
             replaced_flag = True
