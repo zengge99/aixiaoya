@@ -62,7 +62,7 @@ class TextUtils:
         
         def replace_func(match):
             cn_val = match.group(1)
-            return cn_to_arabic(cn_val)
+            return TextUtils.cn_to_arabic(cn_val)
 
         # 使用 re.sub 进行替换
         result = re.sub(pattern, replace_func, text)
