@@ -42,12 +42,13 @@ class TextUtils:
         if ai_result and all(ord(c) < 128 for c in ai_result):
             return ai_result
 
-        replace_patterns = [
-            r'Season\s*(\d{1,2})',              
-            r'SE(\d{1,2})',                     
-            r'(?<![a-zA-Z])S(\d{1,2})(?![a-zA-Z])', 
-            r'第(\d{1,2})季'                    
-        ]
+        cn_season_pattern = r'第[一二三四五六七八九十]+季'
+        cn_match = re.search(cn_season_pattern, path)
+        if cn_match:
+            suffix = cn_match.group(0)
+            if suffix not in processed_result:
+                return f"{processed_result} {suffix}".strip()
+            return processed_result
 
         processed_result = ai_result
         replaced_flag = False 
