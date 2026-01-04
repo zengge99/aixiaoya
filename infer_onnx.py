@@ -18,6 +18,57 @@ class TextUtils:
     CN_NUMS = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]
 
     @staticmethod
+    def cn_to_arabic(cn_str):
+    """将中文数字（一到九十九）转换为字符串格式的阿拉伯数字"""
+    cn_num_map = {'零':0, '一':1, '二':2, '三':3, '四':4, '五':5, '六':6, '七':7, '八':8, '九':9}
+    
+    # 如果本身就是阿拉伯数字，直接返回
+    if cn_str.isdigit():
+        return cn_str
+    
+    # 处理逻辑
+    if cn_str == "十":
+        return "10"
+    
+    res = 0
+    if "十" in cn_str:
+        parts = cn_str.split("十")
+        # 处理 "二十..." 或 "十..."
+        # 如果 "十" 在开头（如十一），前部分为空
+        prefix = parts[0]
+        suffix = parts[1]
+        
+        if prefix: # 二十...
+            res += cn_num_map[prefix] * 10
+        else: # 十...
+            res += 10
+            
+        if suffix: # ...十一
+            res += cn_num_map[suffix]
+    else:
+        # 仅有个位数
+        res = cn_num_map.get(cn_str, cn_str)
+        
+    return str(res)
+
+    @staticmethod
+    def simplify_season_name(text):
+        """
+        核心转换函数
+        例如: '功夫熊猫 第十一季' -> '功夫熊猫11'
+        """
+        # 正则匹配：匹配“第”后面跟着的一串中文数字或阿拉伯数字，直到“季”
+        pattern = r'\s*第([一二三四五六七八九十\d]+)季'
+        
+        def replace_func(match):
+            cn_val = match.group(1)
+            return cn_to_arabic(cn_val)
+
+        # 使用 re.sub 进行替换
+        result = re.sub(pattern, replace_func, text)
+        return result.strip()
+
+    @staticmethod
     def number2text(text):
         if not text: return text
         text = text.lstrip('0')
@@ -90,7 +141,9 @@ class TextUtils:
 
     @staticmethod
     def fix_name(path, ai_result):
-        return TextUtils.fix_name_internal(path, ai_result).replace("第一季", "", 1).strip()
+        result = TextUtils.fix_name_internal(path, ai_result).replace("第一季", "", 1).strip()
+        # tmdb不太认“功夫熊猫 第三季”这种，要转换成“功夫熊猫3”
+        return TextUtils.simplify_season_name(result)
 
 def get_resource_path(relative_path):
     if os.path.exists(relative_path):
