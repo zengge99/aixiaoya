@@ -41,6 +41,7 @@ class TextUtils:
     def fix_name_internal(path, ai_result):
         if ai_result and all(ord(c) < 128 for c in ai_result):
             return ai_result
+        processed_result = ai_result
 
         cn_season_pattern = r'第[一二三四五六七八九十]+季'
         cn_match = re.search(cn_season_pattern, path)
@@ -50,7 +51,6 @@ class TextUtils:
                 return f"{processed_result} {suffix}".strip()
             return processed_result
 
-        processed_result = ai_result
         replaced_flag = False 
 
         def replace_func(match):
