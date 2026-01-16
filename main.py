@@ -125,7 +125,6 @@ class TextUtils:
     def fix_name(path, ai_result):
         return TextUtils.fix_name_internal(path, ai_result).replace("第一季", "", 1).strip()
 
-# --- 模型结构 (CNN + BiGRU + Attention) ---
 class Extractor(nn.Module):
     def __init__(self, vocab_size, embed_dim=128, hidden_dim=256):
         super().__init__()
@@ -136,8 +135,6 @@ class Extractor(nn.Module):
         self.relu = nn.ReLU()
         self.norm1 = nn.LayerNorm(embed_dim)
         
-        # 将 GRU 替换为 LSTM
-        # bidirectional=True, num_layers=2 保持不变
         self.lstm = nn.LSTM(embed_dim, hidden_dim, bidirectional=True, 
                             batch_first=True, num_layers=2, dropout=0.5)
         
@@ -160,24 +157,17 @@ class Extractor(nn.Module):
         
         rnn_in = self.norm1(emb + cnn_out)
         
-        # --- LSTM 处理 ---
-        # 显式初始化 h0 和 c0 (LSTM 多了一个 cell state)
-        # 维度: (num_layers * num_directions, batch, hidden_size)
         h0 = torch.zeros(2 * 2, x.size(0), self.lstm.hidden_size).to(x.device)
         c0 = torch.zeros(2 * 2, x.size(0), self.lstm.hidden_size).to(x.device)
         
-        # LSTM 返回的是 (output, (h_n, c_n))
         lstm_out, _ = self.lstm(rnn_in, (h0, c0)) 
-        # lstm_out: [B, L, H*2]
         
-        # --- 后续 Attention 逻辑 (无需修改) ---
         attn_scores = torch.tanh(self.attention_linear(lstm_out))
         attn_weights = F.softmax(attn_scores, dim=1)
         
         context = torch.sum(lstm_out * attn_weights, dim=1)
         
         seq_len = lstm_out.size(1)
-        # 建议这里使用 expand 而不是 repeat，对 ONNX 更友好
         context_expanded = context.unsqueeze(1).expand(-1, seq_len, -1)
         
         combined = torch.cat([lstm_out, context_expanded], dim=2)
