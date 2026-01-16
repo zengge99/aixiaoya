@@ -19,8 +19,8 @@ BATCH_SIZE = 128
 LR = 1e-3            # 学习率
 EPOCHS = 50          # 训练轮数
 MAX_LEN = 300        # 最大序列长度
-EMBED_DIM = 64      # 向量维度
-HIDDEN_DIM = 96     # 隐藏层维度
+EMBED_DIM = 32      # 向量维度
+HIDDEN_DIM = 64     # 隐藏层维度
 
 MODEL_PATH = "movie_model.pth"
 VOCAB_PATH = "vocab.pkl"
