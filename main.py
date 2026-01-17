@@ -293,11 +293,11 @@ class MovieDataset(Dataset):
                 noise = random.choice(self.SUFFIX_LIST)
                 input_path = f"{input_path}/{noise}"
 
-            if random.random() < 0.3:
-                noise1 = random.choice(['01', '02', 'S01E01', 'S01E02', '1', '2', '3', 'S02E01'])
-                noise2 = random.choice(['.mp4', '.mkv', '.avi', '.rmvb', '.wmv', '.mov', '.flv', '.iso'])
-                noise = f"{noise1}{noise2}"
-                input_path = f"{input_path}/{noise}"
+            # if random.random() < 0.3:
+            #     noise1 = random.choice(['01', '02', 'S01E01', 'S01E02', '1', '2', '3', 'S02E01'])
+            #     noise2 = random.choice(['.mp4', '.mkv', '.avi', '.rmvb', '.wmv', '.mov', '.flv', '.iso'])
+            #     noise = f"{noise1}{noise2}"
+            #     input_path = f"{input_path}/{noise}"
 
             # === Part B: 分隔符扰动 ===
             if random.random() < 0.3:
