@@ -243,7 +243,6 @@ class MovieDataset(Dataset):
     ]
     
     SUFFIX_LIST = [
-        'mp4', 'mkv', 'avi', 'rmvb', 'wmv', 'mov', 'flv', 'iso', 'torrent',
         '1080p', '720p', '2160p', '4K', 'x264', 'x265', 'HEVC', 
         'HDR', 'BluRay', 'BDrip', 'WebDL', 'HDTV', 'AAC', 'DTS', 'Atmos',
         '高清', '蓝光', '字幕', '福利', '完结', '未删减', '加长版',
@@ -292,9 +291,13 @@ class MovieDataset(Dataset):
             else:
                 # --- 情况 2：加后缀 (模拟文件属性/标签) ---
                 noise = random.choice(self.SUFFIX_LIST)
-                # 后缀分隔符主要是点、下划线、空格、短横线
-                sep = random.choice(['.', '_', ' ', '-'])
-                input_path = f"{input_path}{sep}{noise}"
+                input_path = f"{input_path}/{noise}"
+
+            if random.random() < 0.3:
+                noise1 = random.choice(['01', '02', 'S01E01', 'S01E02', '1', '2', '3', 'S02E01'])
+                noise2 = random.choice(['.mp4', '.mkv', '.avi', '.rmvb', '.wmv', '.mov', '.flv', '.iso'])
+                noise = f"{noise1}{noise2}"
+                input_path = f"{input_path}/{noise}"
 
             # === Part B: 分隔符扰动 ===
             if random.random() < 0.3:
