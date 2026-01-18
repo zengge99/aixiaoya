@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- 配置区 ---
-webdav_server=http://113.5.22.166:5678/dav
+webdav_server=http://113.5.22.166:5678
 webdav_user="guest"
 webdav_password="guest_Api789"
 webdav_port=65432
@@ -94,7 +94,7 @@ PIDS+=($!)
 
 # 启动 webdav (端口 $webdav_port)
 touch fake.txt
-./webdav_linux_$arch --file "*.txt" --url "$webdav_server" --user "$webdav_user" --password "$webdav_password" --port "$webdav_port" --obfuscate &
+./webdav_linux_$arch --file "*.txt" --url "$webdav_server/dav" --user "$webdav_user" --password "$webdav_password" --port "$webdav_port" --obfuscate &
 PIDS+=($!)
 
 # 验证后台进程是否成功启动
