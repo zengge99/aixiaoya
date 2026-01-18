@@ -22,7 +22,6 @@ if [[ "$machine" == *"arm"* || "$machine" == *"aarch"* ]]; then
 else
     arch="amd64"
 fi
-echo "arch:$arch"
 chmod 755 movie_extractor_linux_$arch
 killall movie_extractor_linux_$arch >/dev/null 2>&1
 ./movie_extractor_linux_$arch --srv 8889 >/dev/null 2>&1 &
