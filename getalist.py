@@ -111,7 +111,6 @@ def walk(headers:dict, api_url:str, sleep:float, current_path="/", output_file=N
         is_dir = item.get("is_dir", False)
             
         if is_dir:
-            if sleep: time.sleep(sleep)
             if not fullscan and not full_path in lastpath:
                 continue
                 
@@ -121,6 +120,7 @@ def walk(headers:dict, api_url:str, sleep:float, current_path="/", output_file=N
                 fullscan = True
                 
             try:
+                if sleep: time.sleep(sleep)
                 # 递归调用
                 walk(headers, api_url, sleep, full_path, output_file, replaceroot, lastpath)
             except (KeyboardInterrupt, SystemExit):
