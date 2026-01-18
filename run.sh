@@ -20,7 +20,7 @@ tasks=(
     "/整理中|zlz.txt"
 )
 
-# --- 脚本路径解析 (保留原逻辑) ---
+# --- 脚本路径解析 ---
 prog="$0"
 while [ -h "${prog}" ]; do
     newProg=`/bin/ls -ld "${prog}"`
@@ -42,12 +42,29 @@ else
     arch="amd64"
 fi
 
-# --- 变量与清理函数 ---
-PIDS=() # 用于存放后台进程ID
+# --- 进程管理逻辑 ---
+PIDS=() 
 
+# 停止先前运行的残留进程
+stop_existing() {
+    echo "[!] 检查并清理旧的后台进程..."
+    
+    # 1. 根据二进制名称清理 (匹配所有架构版本)
+    # pkill -f 匹配完整命令行，比 killall 更强大
+    pkill -f "movie_extractor_linux_" >/dev/null 2>&1
+    pkill -f "webdav_linux_" >/dev/null 2>&1
+    
+    # 2. 根据端口清理 (防止进程名变了但端口仍被占用)
+    # 尝试使用 fuser 杀掉占用端口的进程（如果系统安装了 psmisc）
+    fuser -k 8889/tcp >/dev/null 2>&1
+    fuser -k ${webdav_port}/tcp >/dev/null 2>&1
+    
+    sleep 1 # 等待进程完全退出
+}
+
+# 当前运行中的清理函数（Ctrl+C 时触发）
 cleanup() {
-    echo -e "\n\033[31m[!] 接收到中断信号，正在清理后台进程...\033[0m"
-    # 杀掉保存在数组里的后台 PID
+    echo -e "\n\033[31m[!] 接收到中断信号，正在清理当前后台进程...\033[0m"
     for pid in "${PIDS[@]}"; do
         if kill -0 "$pid" >/dev/null 2>&1; then
             kill "$pid" >/dev/null 2>&1
@@ -57,29 +74,41 @@ cleanup() {
     exit 0
 }
 
-# 捕获 SIGINT (Ctrl+C) 和 SIGTERM
+# 捕获信号
 trap cleanup SIGINT SIGTERM
 
-# --- 启动前准备 ---
+# --- 执行开始 ---
+
+# 1. 彻底清理旧进程
+stop_existing
+
+# 2. 准备权限
 chmod 755 "movie_extractor_linux_$arch" "webdav_linux_$arch" "getalist_linux_$arch"
 
-# 强力清理旧进程（可选）
-killall "movie_extractor_linux_$arch" "webdav_linux_$arch" >/dev/null 2>&1
+# 3. 启动后台服务
+echo "[+] 正在启动后台服务..."
 
-# --- 启动后台服务 ---
-
-# 1. 启动 movie_extractor
+# 启动 movie_extractor (端口 8889)
 ./movie_extractor_linux_$arch --srv 8889 >/dev/null 2>&1 &
-PIDS+=($!) # 记录 PID
+PIDS+=($!)
 
-# 2. 启动 webdav
+# 启动 webdav (端口 $webdav_port)
 touch fake.txt
-./webdav_linux_$arch --file "*.txt" --url "$webdav_server" --user "$webdav_user" --password "$webdav_password" --port "$webdav_port" --obfuscate &
-PIDS+=($!) # 记录 PID
+./webdav_linux_$arch --file "*.txt" --url "$webdav_server" --user "$webdav_user" --password "$webdav_password" --port "$webdav_port" --obfuscate >/dev/null 2>&1 &
+PIDS+=($!)
 
-echo "[+] 后台服务已启动 (PIDs: ${PIDS[*]})"
+# 验证后台进程是否成功启动
+sleep 2
+for pid in "${PIDS[@]}"; do
+    if ! kill -0 "$pid" >/dev/null 2>&1; then
+        echo -e "\033[31m[错误] 后台进程 $pid 启动失败，请检查配置或权限。\033[0m"
+        exit 1
+    fi
+done
 
-# --- 执行循环任务 ---
+echo "[+] 后台服务已就绪 (PIDs: ${PIDS[*]})"
+
+# 4. 执行循环任务
 for task in "${tasks[@]}"; do
     url="$index_server${task%%|*}"
     output="${task##*|}"
@@ -88,11 +117,10 @@ for task in "${tasks[@]}"; do
     echo "正在处理: $url"
     echo "保存到: $output"
     
-    # 执行主任务
     ./getalist_linux_$arch --url "$url" --user "$index_user" --password "$index_password" --output "$output"
     
-    # 检查上个命令状态，如果 getalist 被 Ctrl+C 也会中断循环
     if [ $? -ne 0 ]; then
+        echo "[!] getalist 任务中断"
         cleanup
     fi
 done
@@ -100,5 +128,5 @@ done
 echo "----------------------------------------"
 echo "[+] 所有任务处理完成！"
 
-# 脚本正常结束前，询问是否保留后台进程
-read -t 5 -p "脚本即将退出，后台服务将继续运行。若要立即停止请按 Ctrl+C (5秒后自动后台化)..." || echo ""
+# 正常退出提示
+read -t 5 -p "脚本任务已完成，后台服务将继续运行。按 Ctrl+C 停止服务，或等待 5 秒自动退出脚本..." || echo ""
