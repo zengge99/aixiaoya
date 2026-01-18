@@ -94,7 +94,7 @@ PIDS+=($!)
 
 # 启动 webdav (端口 $webdav_port)
 touch fake.txt
-./webdav_linux_$arch --file "*.txt" --url "$webdav_server" --user "$webdav_user" --password "$webdav_password" --port "$webdav_port" --obfuscate >/dev/null 2>&1 &
+./webdav_linux_$arch --file "*.txt" --url "$webdav_server" --user "$webdav_user" --password "$webdav_password" --port "$webdav_port" --obfuscate &
 PIDS+=($!)
 
 # 验证后台进程是否成功启动
