@@ -190,9 +190,9 @@ jobs:
       - name: 压缩 release 目录为 zip
         run: |
           cd release
-          zip -r ../all_binaries.zip .
+          # zip -r ../all_binaries.zip .
           cd ..
-          cp all_binaries.zip release/
+          # cp all_binaries.zip release/
 
       - name: 推送产物
         run: |
