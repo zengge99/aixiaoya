@@ -80,7 +80,7 @@ def walk(headers:dict, api_url:str, current_path="/", output_file=None, replacer
             raise SystemExit("连续失败次数过多，退出")
         return
 
-    print(f"目录 {current_path} 文件数: {len(items)}")
+    # print(f"目录 {current_path} 文件数: {len(items)}")
     filetype_re = re.compile(r'\.(png|jpg|jpeg|bmp|gif|doc|nfo|flac|mp3|wma|ape|cue|wav|dst|dff|dts|ac3|eac3|txt|db|pdf)$')
     
     for item in items:
