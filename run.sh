@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # --- 配置区 ---
-webdav_server=http://113.65.22.166:5678
+webdav_server=http://113.5.22.166:5678
 webdav_user="guest"
 webdav_password="guest_Api789"
 webdav_port=64000
 
-index_server=http://113.65.22.166:5678
+index_server=http://113.5.22.166:5678
 index_user="guest"
 index_password="guest_Api789"
 
