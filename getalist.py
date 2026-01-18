@@ -54,7 +54,7 @@ def get_api_correction(dir_path):
     api_name_cache[dir_path] = raw_name
     return raw_name
 
-def walk(headers:dict, api_url:str, current_path="/", sleep, output_file=None, replaceroot=None, lastpath=None):
+def walk(headers:dict, api_url:str, sleep:float, current_path="/", output_file=None, replaceroot=None, lastpath=None):
     global failcount, fullscan, count
     params = {"path": current_path}
     
@@ -122,7 +122,7 @@ def walk(headers:dict, api_url:str, current_path="/", sleep, output_file=None, r
                 
             try:
                 # 递归调用
-                walk(headers, api_url, full_path, sleep, output_file, replaceroot, lastpath)
+                walk(headers, api_url, sleep, full_path, output_file, replaceroot, lastpath)
             except (KeyboardInterrupt, SystemExit):
                 raise
             except Exception:
