@@ -1,9 +1,15 @@
 #!/bin/bash
 
-server=http://113.5.22.166:5678
-user="guest"
-password="guest_Api789"
-port=64000
+#webdav设置
+webdav_server=http://113.5.22.166:5678
+webdav_user="guest"
+webdav_password="guest_Api789"
+webdav_port=64000
+
+#索引设置
+index_server=http://113.5.22.166:5678
+index_user="guest"
+index_password="guest_Api789"
 tasks=(
     "/🏷️我的115分享|115share.txt"
     "/每日更新|daily.txt"
@@ -45,12 +51,12 @@ killall webdav_linux_$arch >/dev/null 2>&1
 ./movie_extractor_linux_$arch --srv 8889 >/dev/null 2>&1 &
 {
 	touch fake.txt
-	./webdav_linux_$arch --file "*.txt" --url "$server" --user "$user" --password "$password" --port "$port" --obfuscate
+	./webdav_linux_$arch --file "*.txt" --url "$webdav_server" --user "$webdav_user" --password "$webdav_password" --port "$webdav_port" --obfuscate
 }&
 
 for task in "${tasks[@]}"; do
-    url="$server${task%%|*}"
+    url="$index_server${task%%|*}"
     output="${task##*|}"
     echo "正在处理: $url -> $output"
-    ./getalist_linux_$arch --url "$url" --user "$user" --password "$password" --output "$output"
+    ./getalist_linux_$arch --url "$url" --user "$index_user --password "$index_password" --output "$output"
 done
