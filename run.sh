@@ -1,24 +1,25 @@
 #!/bin/bash
 
-# --- 配置区 ---
+# --- webdav反代服务配置区 ---
 webdav_server=http://113.5.22.166:5678
 webdav_user="guest"
 webdav_password="guest_Api789"
 webdav_port=65432
 
-index_server=http://113.5.22.166:5678
-index_user="guest"
-index_password="guest_Api789"
-
+# --- webdav反代服务配置区，默认与webdav配置一致，也可以单独设置---
+index_server="$webdav_server"
+index_user="$webdav_user"
+index_password="$webdav_password"
 tasks=(
-    "/🏷️我的115分享|115share.txt"
-    "/每日更新|daily.txt"
-    "/电影|dy.txt"
-    "/电视剧|dsj.txt"
-    "/综艺|zy.txt"
-    "/纪录片|jlp.txt"
-    "/整理中|zlz.txt"
-)
+    # 默认不扫描目录索引，扫描会增大网盘风控概率，不建议扫描。如需扫描取消如下注释。
+    #"/🏷️我的115分享|115share.txt"
+    #"/每日更新|daily.txt"
+    #"/电影|dy.txt"
+    #"/电视剧|dsj.txt"
+    #"/综艺|zy.txt"
+    #"/纪录片|jlp.txt"
+    #"/整理中|zlz.txt"
+) 
 
 # --- 脚本路径解析 ---
 prog="$0"
