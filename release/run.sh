@@ -118,7 +118,7 @@ for task in "${tasks[@]}"; do
     echo "正在处理: $url"
     echo "保存到: $output"
     
-    ./getalist_linux_$arch --url "$url" --user "$index_user" --password "$index_password" --output "$output"
+    ./getalist_linux_$arch --url "$url" --user "$index_user" --password "$index_password" --output "$output" --sleep "0.5"
     
     if [ $? -ne 0 ]; then
         echo "[!] getalist 任务中断"
