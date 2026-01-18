@@ -3,6 +3,7 @@
 server=http://113.65.22.166:5678
 user="guest"
 password="guest_Api789"
+port=64000
 tasks=(
     "/🏷️我的115分享|115share.txt"
     "/每日更新|daily.txt"
