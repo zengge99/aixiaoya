@@ -58,29 +58,52 @@ def walk(headers:dict, api_url:str, current_path="/", output_file=None, replacer
     global failcount, fullscan, count
     params = {"path": current_path}
     
-    try:
-        resp = requests.post(
-            api_url + "/api/fs/list",
-            headers=headers,
-            json=params,
-            timeout=(5, 15),
-        )
-        resp.raise_for_status()
-        data_dict = resp.json()
-        items = data_dict['data']['content']
-        failcount = 0
-    except (KeyboardInterrupt, SystemExit):
-        raise
-    except Exception:
-        traceback.print_exc()
-        print(f"Request failed to server: {api_url}")
-        time.sleep(1)
-        failcount += 1
-        if failcount > 10:
-            raise SystemExit("连续失败次数过多，退出")
+    # --- 新增局部重试逻辑 ---
+    items = None
+    max_retries = 3  # 单个目录最多重试3次
+    for attempt in range(max_retries):
+        try:
+            resp = requests.post(
+                api_url + "/api/fs/list",
+                headers=headers,
+                json=params,
+                timeout=(5, 20), # 增加一点超时容忍度
+            )
+            resp.raise_for_status()
+            data_dict = resp.json()
+            
+            # 兼容处理 Alist 某些错误返回
+            if data_dict.get('code') != 200:
+                raise Exception(f"Alist API Error: {data_dict.get('message')}")
+                
+            items = data_dict['data']['content']
+            failcount = 0  # 请求成功，重置全局连续失败计数
+            break  # 成功获取数据，跳出重试循环
+            
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as e:
+            print(f"目录请求失败 ({attempt + 1}/{max_retries}): {current_path}")
+            print(f"原因: {e}")
+            
+            failcount += 1
+            if failcount > 15:  # 全局连续失败阈值稍微调高一点点
+                raise SystemExit("全局连续失败次数过多，程序强制退出以防死循环")
+            
+            if attempt < max_retries - 1:
+                wait_time = (attempt + 1) * 3  # 第一次失败等3秒，第二次等6秒
+                print(f"等待 {wait_time} 秒后重试...")
+                time.sleep(wait_time)
+            else:
+                # 3次都失败了
+                print(f"！！！无法进入目录（已跳过）: {current_path}")
+                return # 只有重试耗尽才退出当前层级
+
+    # 如果没拿到数据，直接返回，不再向下执行
+    if items is None:
         return
 
-    # print(f"目录 {current_path} 文件数: {len(items)}")
+    # --- 后续处理逻辑（保持不变） ---
     filetype_re = re.compile(r'\.(png|jpg|jpeg|bmp|gif|doc|nfo|flac|mp3|wma|ape|cue|wav|dst|dff|dts|ac3|eac3|txt|db|pdf)$')
     
     for item in items:
@@ -97,6 +120,7 @@ def walk(headers:dict, api_url:str, current_path="/", output_file=None, replacer
                 fullscan = True
                 
             try:
+                # 递归调用
                 walk(headers, api_url, full_path, output_file, replaceroot, lastpath)
             except (KeyboardInterrupt, SystemExit):
                 raise
@@ -106,7 +130,7 @@ def walk(headers:dict, api_url:str, current_path="/", output_file=None, replacer
             if not fullscan:
                 continue
             
-            # 过滤后缀
+            # [原有的文件处理逻辑: 过滤后缀、计算大小、获取修正名等...]
             if filetype_re.search(full_path) or "BDMV" in full_path:
                 continue
             
@@ -114,7 +138,6 @@ def walk(headers:dict, api_url:str, current_path="/", output_file=None, replacer
             if size > 0 and size < 4096:
                 continue
                 
-            # 路径转换
             final_path = full_path
             if replaceroot is not None:
                 if replaceroot == "":
@@ -123,7 +146,6 @@ def walk(headers:dict, api_url:str, current_path="/", output_file=None, replacer
                     final_path = "/" + replaceroot + "/" + "/".join(full_path.split("/")[2:])
                 final_path = final_path.replace("//", "/").replace("\\/", "|")
 
-            # 修正名合成
             raw_correction = get_api_correction(os.path.dirname(final_path))
             year = extract_year(final_path)
             
@@ -137,8 +159,7 @@ def walk(headers:dict, api_url:str, current_path="/", output_file=None, replacer
             print(output_line)
             
             if output_file:
-                if "\n" not in output_line:
-                    output_file.write(output_line + "\n")
+                output_file.write(output_line + "\n")
                 output_file.flush()
 
 def extract_url_components(url):
