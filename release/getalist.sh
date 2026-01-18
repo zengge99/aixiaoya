@@ -1,6 +1,8 @@
 #!/bin/bash
 
 server=http://113.65.22.166:5678
+user="guest"
+password="guest_Api789"
 tasks=(
     "/🏷️我的115分享|115share.txt"
     "/每日更新|daily.txt"
@@ -30,8 +32,15 @@ else
 fi
 
 chmod 755 movie_extractor_linux_$arch
+chmod 755 webdav_linux_$arch
+chmod 755 getalist_linux_$arch
 killall movie_extractor_linux_$arch >/dev/null 2>&1
+killall webdav_linux_$arch >/dev/null 2>&1
 ./movie_extractor_linux_$arch --srv 8889 >/dev/null 2>&1 &
+{
+	sleep 60
+	./webdav_linux_$arch --file "*.txt" --url "$server" --user guest 
+}&
 
 for task in "${tasks[@]}"; do
     url="$server${task%%|*}"
