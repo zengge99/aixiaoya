@@ -6,7 +6,7 @@ webdav_user="guest"
 webdav_password="guest_Api789"
 webdav_port="65432"
 
-# --- webdav反代服务配置区，默认与webdav配置一致，也可以单独设置---
+# --- 索引扫描配置区，默认与webdav配置一致，也可以单独设置---
 index_server="$webdav_server"
 index_user="$webdav_user"
 index_password="$webdav_password"
