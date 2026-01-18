@@ -82,9 +82,17 @@ jobs:
               --add-data "movie_extractor.onnx.data:." \
               --add-data "vocab.pkl:." \
               infer_onnx.py
+          RUN pyinstaller --onefile --clean \
+              --name webdav_linux_${{ matrix.arch }} \
+              webdav.py
+          RUN pyinstaller --onefile --clean \
+              --name getalist_linux_${{ matrix.arch }} \
+              getalist.py
 
           FROM scratch AS export-stage
           COPY --from=builder /app/dist/movie_extractor_linux_${{ matrix.arch }} /output/
+          COPY --from=builder /app/dist/webdav_linux_${{ matrix.arch }} /output/
+          COPY --from=builder /app/dist/getalist_linux_${{ matrix.arch }} /output/
           EOF
 
           docker buildx build \
@@ -98,7 +106,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: binary_linux_${{ matrix.arch }}
-          path: output/movie_extractor_linux_${{ matrix.arch }}
+          path: |
+            output/movie_extractor_linux_${{ matrix.arch }}
+            output/webdav_linux_${{ matrix.arch }}
+            output/getalist_linux_${{ matrix.arch }}
 
   # ========== 第三阶段：Windows 打包 ==========
   build-windows:
@@ -136,12 +147,21 @@ jobs:
             --add-data "movie_extractor.onnx.data;." `
             --add-data "vocab.pkl;." `
             infer_onnx.py
+          pyinstaller --onefile --clean `
+            --name webdav_win_amd64 `
+            webdav.py
+          pyinstaller --onefile --clean `
+            --name getalist_win_amd64 `
+            getalist.py
 
       - name: 上传 Windows 二进制
         uses: actions/upload-artifact@v4
         with:
           name: binary_win_amd64
-          path: dist/movie_extractor_win_amd64.exe
+          path: |
+            dist/movie_extractor_win_amd64.exe
+            dist/webdav_win_amd64.exe
+            dist/getalist_win_amd64.exe
 
   # ========== 第四阶段：整理并推送到仓库 ==========
   deploy:
