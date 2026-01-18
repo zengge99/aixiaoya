@@ -22,6 +22,8 @@ if [[ "$machine" == *"arm"* || "$machine" == *"aarch"* ]]; then
 else
     arch="amd64"
 fi
+
 chmod 755 movie_extractor_linux_$arch
 killall movie_extractor_linux_$arch >/dev/null 2>&1
 ./movie_extractor_linux_$arch --srv 8889 >/dev/null 2>&1 &
+./getalist_linux_$arch --url http://113.65.22.166:5678/🏷️我的115分享 --output 115share.txt
