@@ -58,5 +58,5 @@ for task in "${tasks[@]}"; do
     url="$index_server${task%%|*}"
     output="${task##*|}"
     echo "正在处理: $url -> $output"
-    ./getalist_linux_$arch --url "$url" --user "$index_user --password "$index_password" --output "$output"
+    ./getalist_linux_$arch --url "$url" --user "$index_user" --password "$index_password" --output "$output"
 done
