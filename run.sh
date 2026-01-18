@@ -74,7 +74,7 @@ PIDS+=($!) # 记录 PID
 
 # 2. 启动 webdav
 touch fake.txt
-./webdav_linux_$arch --file "*.txt" --url "$webdav_server" --user "$webdav_user" --password "$webdav_password" --port "$webdav_port" --obfuscate >/dev/null 2>&1 &
+./webdav_linux_$arch --file "*.txt" --url "$webdav_server" --user "$webdav_user" --password "$webdav_password" --port "$webdav_port" --obfuscate &
 PIDS+=($!) # 记录 PID
 
 echo "[+] 后台服务已启动 (PIDs: ${PIDS[*]})"
