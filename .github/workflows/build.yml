@@ -190,9 +190,10 @@ jobs:
       - name: 压缩 release 目录为 zip
         run: |
           cd release
-          # zip -r ../all_binaries.zip .
+          zip -r ../linux_arm64_binaries.zip run.sh *arm64*
+          zip -r ../linux_amd64_binaries.zip run.sh *amd64*
           cd ..
-          # cp all_binaries.zip release/
+          mv *_binaries.zip release/
 
       - name: 推送产物
         run: |
