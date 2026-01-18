@@ -1,6 +1,6 @@
 #!/bin/bash
 
-server=http://113.65.22.166:5678
+server=http://113.5.22.166:5678
 user="guest"
 password="guest_Api789"
 port=64000
