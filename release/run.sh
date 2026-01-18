@@ -7,6 +7,11 @@ port=64000
 tasks=(
     "/🏷️我的115分享|115share.txt"
     "/每日更新|daily.txt"
+	"/电影|dy.txt"
+	"/电视剧|dsj.txt"
+	"/综艺|zy.txt"
+	"/纪录片|jlp.txt"
+	"/整理中|zlz.txt"
 )
 
 prog="$0"
