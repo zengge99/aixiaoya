@@ -25,4 +25,4 @@ fi
 echo "arch:$arch"
 chmod 755 movie_extractor_linux_$arch
 killall movie_extractor_linux_$arch
-./movie_extractor_linux_$arch --srv 8889 2>&1 >/dev/null &
+./movie_extractor_linux_$arch --srv 8889 >/dev/null 2>&1 &
