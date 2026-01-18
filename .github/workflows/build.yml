@@ -70,7 +70,7 @@ jobs:
           WORKDIR /app
           RUN apt-get update && apt-get install -y --no-install-recommends gcc g++ && rm -rf /var/lib/apt/lists/*
           RUN pip install --upgrade pip
-          RUN pip install --no-cache-dir onnxruntime flask pyinstaller
+          RUN pip install --no-cache-dir onnxruntime flask pyinstaller fastapi uvicorn requests
           
           COPY . .
           COPY ./common_files/* . 
@@ -134,7 +134,7 @@ jobs:
       - name: 安装依赖
         run: |
           pip install --upgrade pip
-          pip install --no-cache-dir onnxruntime flask pyinstaller
+          pip install --no-cache-dir onnxruntime flask pyinstaller fastapi uvicorn requests
 
       - name: PyInstaller 打包
         run: |
