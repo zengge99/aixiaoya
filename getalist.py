@@ -238,7 +238,7 @@ def main():
     output_file = None
     try:
         output_file = open(args.output, mode="a", encoding="utf-8")
-        walk(headers, f"{schema}://{hostname}", path, args.sleep, output_file, args.replaceroot, last_path_val)
+        walk(headers, f"{schema}://{hostname}", args.sleep, path, output_file, args.replaceroot, last_path_val)
     except KeyboardInterrupt:
         print("\n[!] 用户中止 (Ctrl+C)，正在安全退出...")
     except Exception:
