@@ -179,6 +179,7 @@ jobs:
           rm -rf release/
           mkdir -p release/
           cp ./run.sh release/
+          cp ../index/*.txt release/
 
       - name: 下载所有构建产物
         uses: actions/download-artifact@v4
@@ -203,8 +204,8 @@ jobs:
       - name: 压缩 release 目录为 zip
         run: |
           cd release
-          zip -r ../linux_arm64_binaries.zip run.sh *linux*arm64*
-          zip -r ../linux_amd64_binaries.zip run.sh *linux*amd64*
+          zip -r ../linux_arm64_binaries.zip run.sh *.txt *linux*arm64*
+          zip -r ../linux_amd64_binaries.zip run.sh *.txt *linux*amd64*
           cd ..
 
       - name: 发布到 GitHub Release
