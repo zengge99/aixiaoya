@@ -24,4 +24,5 @@ else
 fi
 echo "arch:$arch"
 chmod 755 movie_extractor_linux_$arch
-./movie_extractor_linux_$arch --srv 8889
+killall movie_extractor_linux_$arch
+./movie_extractor_linux_$arch --srv 8889 2>&1 >/dev/null &
