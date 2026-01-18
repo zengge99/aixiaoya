@@ -39,7 +39,7 @@ killall webdav_linux_$arch >/dev/null 2>&1
 ./movie_extractor_linux_$arch --srv 8889 >/dev/null 2>&1 &
 {
 	sleep 60
-	./webdav_linux_$arch --file "*.txt" --url "$server" --user guest 
+	./webdav_linux_$arch --file "*.txt" --url "$server" --user "$user" --password "$password" --port "$port" --obfuscate
 }&
 
 for task in "${tasks[@]}"; do
