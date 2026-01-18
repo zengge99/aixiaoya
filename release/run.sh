@@ -47,5 +47,5 @@ for task in "${tasks[@]}"; do
     url="$server${task%%|*}"
     output="${task##*|}"
     echo "正在处理: $url -> $output"
-    ./getalist_linux_$arch --url "$url" --output "$output"
+    ./getalist_linux_$arch --url "$url" --user "$user" --password "$password" --output "$output"
 done

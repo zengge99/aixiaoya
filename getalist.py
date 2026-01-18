@@ -148,10 +148,33 @@ def extract_url_components(url):
     path = parsed.path.rstrip('/') or '/'
     return schema, hostname, path
 
+def get_alist_token(base_url, username, password):
+    url = f"{base_url.rstrip('/')}/api/auth/login"
+    payload = {
+        "username": username,
+        "password": password
+    }
+
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        response.raise_for_status()
+        res_data = response.json()
+        if res_data.get("code") == 200:
+            token = res_data["data"]["token"]
+            return token
+        else:
+            print(f"登录失败: {res_data.get('message', '未知错误')}")
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        print(f"网络请求出错: {e}")
+        return None
+
 def main():
     parser = argparse.ArgumentParser(description='AList 目录遍历增强版 V3')
     parser.add_argument('--url', type=str, required=True, help='AList URL')
-    parser.add_argument('--token', type=str, default=None, required=False, help='AList token')
+    parser.add_argument('--user', type=str, default=None, required=False, help='后端alist用户名')
+    parser.add_argument('--password', type=str, default=None, required=False, help='后端alist密码')
     parser.add_argument('--output', type=str, required=True, help='输出文件')
     parser.add_argument('--lastpath', type=str, default=None, required=False, help='断点路径')
     parser.add_argument('--replaceroot', type=str, default=None, required=False, help='替换根目录名称')
@@ -184,8 +207,10 @@ def main():
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
         "Content-Type": "application/json",
     }
-    if args.token:
-        headers["Authorization"] = args.token
+    if args.user and args.password:
+        token = get_alist_token(f"{schema}://{hostname}", args.user, args.password)
+        if token:
+            headers["Authorization"] = token
 
     output_file = None
     try:
