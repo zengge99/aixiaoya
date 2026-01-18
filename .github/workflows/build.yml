@@ -187,14 +187,6 @@ jobs:
           path: release/
           merge-multiple: true
 
-      - name: 压缩 release 目录为 zip
-        run: |
-          cd release
-          zip -r ../linux_arm64_binaries.zip run.sh *arm64*
-          zip -r ../linux_amd64_binaries.zip run.sh *amd64*
-          cd ..
-          mv *_binaries.zip release/
-
       - name: 推送产物
         run: |
           git config --global user.name "GitHub Actions"
@@ -207,3 +199,24 @@ jobs:
             git commit -m "chore: 更新多平台单文件二进制 $(date +%Y%m%d_%H%M%S)"
             git push origin main
           fi
+
+      - name: 压缩 release 目录为 zip
+        run: |
+          cd release
+          zip -r ../linux_arm64_binaries.zip run.sh *arm64*
+          zip -r ../linux_amd64_binaries.zip run.sh *amd64*
+
+      - name: 发布到 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "Latest Build"
+          body: "Latest Build"
+          draft: false
+          prerelease: false
+          make_latest: true
+          files: |
+            release/linux_amd64_binaries.zip
+            release/linux_arm64_binaries.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
