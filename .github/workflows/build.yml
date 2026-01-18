@@ -203,8 +203,8 @@ jobs:
       - name: 压缩 release 目录为 zip
         run: |
           cd release
-          zip -r ../linux_arm64_binaries.zip run.sh *arm64*
-          zip -r ../linux_amd64_binaries.zip run.sh *amd64*
+          zip -r ../linux_arm64_binaries.zip run.sh *linux*arm64*
+          zip -r ../linux_amd64_binaries.zip run.sh *linux*amd64*
           cd ..
 
       - name: 发布到 GitHub Release
