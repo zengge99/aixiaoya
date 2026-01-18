@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # --- webdav反代服务配置区 ---
-webdav_server=http://113.5.22.166:5678
+webdav_server="http://113.5.22.166:5678"
 webdav_user="guest"
 webdav_password="guest_Api789"
-webdav_port=65432
+webdav_port="65432"
 
 # --- webdav反代服务配置区，默认与webdav配置一致，也可以单独设置---
 index_server="$webdav_server"
