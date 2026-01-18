@@ -54,7 +54,7 @@ def get_api_correction(dir_path):
     api_name_cache[dir_path] = raw_name
     return raw_name
 
-def walk(headers:dict, api_url:str, current_path="/", output_file=None, replaceroot=None, lastpath=None):
+def walk(headers:dict, api_url:str, current_path="/", sleep, output_file=None, replaceroot=None, lastpath=None):
     global failcount, fullscan, count
     params = {"path": current_path}
     
@@ -111,6 +111,7 @@ def walk(headers:dict, api_url:str, current_path="/", output_file=None, replacer
         is_dir = item.get("is_dir", False)
             
         if is_dir:
+            if sleep: time.sleep(sleep)
             if not fullscan and not full_path in lastpath:
                 continue
                 
@@ -121,7 +122,7 @@ def walk(headers:dict, api_url:str, current_path="/", output_file=None, replacer
                 
             try:
                 # 递归调用
-                walk(headers, api_url, full_path, output_file, replaceroot, lastpath)
+                walk(headers, api_url, full_path, sleep, output_file, replaceroot, lastpath)
             except (KeyboardInterrupt, SystemExit):
                 raise
             except Exception:
@@ -197,6 +198,7 @@ def main():
     parser.add_argument('--user', type=str, default=None, required=False, help='后端alist用户名')
     parser.add_argument('--password', type=str, default=None, required=False, help='后端alist密码')
     parser.add_argument('--output', type=str, required=True, help='输出文件')
+    parser.add_argument('--sleep', type=float, default=None, required=False, help='目录扫描间隔时间（秒），可以是小数')
     parser.add_argument('--lastpath', type=str, default=None, required=False, help='断点路径')
     parser.add_argument('--replaceroot', type=str, default=None, required=False, help='替换根目录名称')
     args = parser.parse_args()
@@ -236,7 +238,7 @@ def main():
     output_file = None
     try:
         output_file = open(args.output, mode="a", encoding="utf-8")
-        walk(headers, f"{schema}://{hostname}", path, output_file, args.replaceroot, last_path_val)
+        walk(headers, f"{schema}://{hostname}", path, args.sleep, output_file, args.replaceroot, last_path_val)
     except KeyboardInterrupt:
         print("\n[!] 用户中止 (Ctrl+C)，正在安全退出...")
     except Exception:
