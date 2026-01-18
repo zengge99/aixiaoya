@@ -160,7 +160,7 @@ def walk(headers:dict, api_url:str, sleep:float, current_path="/", output_file=N
             print(output_line)
             
             if output_file:
-                if '\n' not in output_line:
+                if "\n" not in output_line:
                     output_file.write(output_line + "\n")
                     output_file.flush()
 
