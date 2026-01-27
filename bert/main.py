@@ -13,23 +13,27 @@ import glob
 from transformers import AutoTokenizer, AutoModel, logging
 
 # --- 配置区 ---
-# 屏蔽 Transformers 的啰嗦警告
 logging.set_verbosity_error()
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # 核心配置
-NUM_THREADS = 4       # CPU 线程数
-BATCH_SIZE = 32       # 批次大小 (CPU 建议 32-64)
-LR = 5e-5             # 学习率
-EPOCHS = 10           # 训练轮数
-MAX_LEN = 128         # 序列截断长度 (128足够覆盖绝大多数路径)
-MODEL_NAME = "prajjwal1/bert-tiny"  # TinyBERT: 2层, 128维, 速度极快
-MODEL_PATH = "movie_model_bert.pth"
+NUM_THREADS = 4       
+BATCH_SIZE = 32       
+LR = 5e-5             
+EPOCHS = 10           
+MAX_LEN = 128         
+
+# === 模型路径配置 (关键修改) ===
+# 基础预训练模型名称 (网上下载的源头)
+BERT_HF_NAME = "prajjwal1/bert-tiny" 
+# 本地保存的基础模型文件夹 (下载一次后就存这儿)
+BERT_LOCAL_FOLDER = "bert_base_local"
+# 我们训练好的权重文件
+MODEL_WEIGHTS_PATH = "movie_model_bert.pth"
+
 DATA_FILE_PATTERN = "train_data*.txt"
 SEED = 42
-
-# 预测配置
-THRESHOLD = 0.5       # 判定阈值
+THRESHOLD = 0.5       
 
 torch.set_num_threads(NUM_THREADS)
 
@@ -42,52 +46,57 @@ def set_seed(seed):
 class TextUtils:
     @staticmethod
     def preprocess_for_bert(text):
-        """
-        关键逻辑：
-        1. 必须保持字符串长度不变 (1对1替换)，以便 offset_mapping 映射回原字符串。
-        2. 将 . 和 _ 替换为空格 (它们通常是单词分隔符)。
-        3. 保留 [] () - ' : 等有助于判断结构的语义符号。
-        4. 其他乱七八糟的符号替换为空格。
-        """
         if not text: return ""
-        
-        # 1. 核心分隔符处理：点和下划线 -> 空格
-        # 这让 "Iron.Man" 变成 "Iron Man"，BERT 更容易理解
         text = re.sub(r'[._]', ' ', text)
-        
-        # 2. 定义白名单 (保留字符)
-        # a-z, 0-9, 中文
         chars = r'a-zA-Z0-9\u4e00-\u9fa5'
-        # 结构性标点 (保留它们，因为 BERT 知道 [ ] 里面的通常不是正文)
         puncts = r'\[\]\(\)\{\}\-\'\"\:!&' 
-        # 中文标点
         cn_puncts = r'【】（）《》：'
-        
-        # 3. 将所有“非白名单”字符替换为空格
         pattern = f'[^{chars}{puncts}{cn_puncts}\s]'
         text = re.sub(pattern, ' ', text)
-        
         return text
 
     @staticmethod
     def cleanup_result(text):
-        """结果清洗：去头去尾，规范化空格"""
         if not text: return ""
-        # 去除首尾的标点和空格
         text = text.strip(" .-_[]()/\\")
-        # 把中间的连续空格合并
         text = re.sub(r'\s+', ' ', text)
         return text
 
+# --- 自动下载并缓存 BERT 的逻辑 ---
+def get_bert_path():
+    """
+    检查本地是否有 BERT 基础模型。
+    如果没有，从 HuggingFace 下载并保存到本地。
+    返回有效的模型路径。
+    """
+    if os.path.exists(BERT_LOCAL_FOLDER) and os.listdir(BERT_LOCAL_FOLDER):
+        # 文件夹存在且不为空，说明已经下载过了
+        return BERT_LOCAL_FOLDER
+    else:
+        print(f"检测到本地无基础模型，正在从 {BERT_HF_NAME} 下载...")
+        try:
+            # 下载 Tokenizer 和 Model
+            tokenizer = AutoTokenizer.from_pretrained(BERT_HF_NAME)
+            model = AutoModel.from_pretrained(BERT_HF_NAME)
+            
+            # 保存到本地文件夹
+            os.makedirs(BERT_LOCAL_FOLDER, exist_ok=True)
+            tokenizer.save_pretrained(BERT_LOCAL_FOLDER)
+            model.save_pretrained(BERT_LOCAL_FOLDER)
+            
+            print(f"基础模型已保存到: {BERT_LOCAL_FOLDER} (以后不再联网下载)")
+            return BERT_LOCAL_FOLDER
+        except Exception as e:
+            print(f"下载失败: {e}")
+            sys.exit(1)
+
 # --- 模型定义 ---
 class BertExtractor(nn.Module):
-    def __init__(self, model_name):
+    def __init__(self, model_path):
         super().__init__()
-        self.bert = AutoModel.from_pretrained(model_name)
-        # TinyBERT 的 hidden_size 是 128
+        # 这里传入的是本地路径
+        self.bert = AutoModel.from_pretrained(model_path)
         self.hidden_size = self.bert.config.hidden_size 
-        
-        # 分类头
         self.classifier = nn.Sequential(
             nn.Dropout(0.1),
             nn.Linear(self.hidden_size, 1),
@@ -95,12 +104,8 @@ class BertExtractor(nn.Module):
         )
 
     def forward(self, input_ids, attention_mask):
-        # BERT 输出
         outputs = self.bert(input_ids=input_ids, attention_mask=attention_mask)
-        # 取最后一层的序列输出: [batch, seq_len, hidden]
         sequence_output = outputs.last_hidden_state
-        
-        # 映射到概率: [batch, seq_len, 1] -> [batch, seq_len]
         probs = self.classifier(sequence_output).squeeze(-1)
         return probs
 
@@ -110,16 +115,12 @@ class MovieDataset(Dataset):
         self.samples = []
         self.tokenizer = tokenizer
         self.max_len = max_len
-        
         for line in lines:
             line = line.strip()
             if '#' not in line: continue
             input_path, target_name = line.rsplit('#', 1)
             target_name = target_name.strip()
             if not target_name: continue
-            
-            # 简单验证：确保 target 在 input 里能找到
-            # 这里做一个宽容匹配，因为路径里的目标可能带点，标签里可能是空格
             escaped = re.escape(target_name).replace(r'\ ', r'.*')
             if re.search(escaped, input_path, re.IGNORECASE):
                 self.samples.append((input_path, target_name))
@@ -128,13 +129,8 @@ class MovieDataset(Dataset):
 
     def __getitem__(self, idx):
         input_path, target_name = self.samples[idx]
-        
-        # 1. 确定目标在原始字符串中的 Start/End 索引
-        # 我们用正则找最后一次出现的匹配
         escaped_target = re.escape(target_name)
-        # 允许目标名中间的空格在路径里是任意字符 (比如 Iron Man -> Iron.Man)
         pattern = escaped_target.replace(r'\ ', r'.+') 
-        
         matches = list(re.finditer(pattern, input_path, re.IGNORECASE))
         if matches:
             match = matches[-1]
@@ -142,11 +138,7 @@ class MovieDataset(Dataset):
         else:
             start_char, end_char = -1, -1
 
-        # 2. 预处理文本 (保留特殊符号，去除干扰符)
         text_for_bert = TextUtils.preprocess_for_bert(input_path)
-
-        # 3. Tokenize
-        # return_offsets_mapping=True 是核心，它告诉我们 token 对应原文本哪里
         encoding = self.tokenizer(
             text_for_bert,
             return_offsets_mapping=True,
@@ -155,26 +147,18 @@ class MovieDataset(Dataset):
             max_length=self.max_len,
             return_tensors='pt'
         )
-        
         input_ids = encoding['input_ids'].squeeze(0)
         attention_mask = encoding['attention_mask'].squeeze(0)
         offset_mapping = encoding['offset_mapping'].squeeze(0)
 
-        # 4. 生成 Label
         labels = torch.zeros(self.max_len, dtype=torch.float)
-        
         if start_char != -1:
             for i, (start, end) in enumerate(offset_mapping):
-                if attention_mask[i] == 0: continue 
-                if start == end: continue # 跳过 [CLS] [SEP]
-                
-                # 计算重叠
+                if attention_mask[i] == 0 or start == end: continue 
                 overlap_start = max(start, start_char)
                 overlap_end = min(end, end_char)
                 overlap = max(0, overlap_end - overlap_start)
                 token_len = end - start
-                
-                # 如果 token 超过 40% 的部分属于电影名，或者是被电影名完全包含
                 if token_len > 0 and (overlap / token_len > 0.4):
                     labels[i] = 1.0
 
@@ -191,9 +175,7 @@ class WeightedBCELoss(nn.Module):
         self.pos_weight = pos_weight
 
     def forward(self, inputs, targets, mask):
-        # 不计算 padding 部分的 loss
         loss = F.binary_cross_entropy(inputs, targets, reduction='none')
-        # 增加正样本(电影名)的权重
         weights = targets * self.pos_weight + (1 - targets)
         loss = loss * weights * mask
         return loss.sum() / (mask.sum() + 1e-6)
@@ -201,12 +183,10 @@ class WeightedBCELoss(nn.Module):
 # --- 训练流程 ---
 def run_train():
     set_seed(SEED)
-    print(f"正在下载/加载模型: {MODEL_NAME} ...")
-    try:
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-    except Exception as e:
-        print(f"模型下载失败，请检查网络。错误: {e}")
-        return
+    
+    # 1. 获取 BERT 基础模型路径 (只下载一次)
+    bert_path = get_bert_path()
+    tokenizer = AutoTokenizer.from_pretrained(bert_path)
 
     # 读取数据
     data_files = glob.glob(DATA_FILE_PATTERN)
@@ -228,16 +208,16 @@ def run_train():
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=min(2, NUM_THREADS))
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False)
     
-    model = BertExtractor(MODEL_NAME)
+    # 2. 从本地加载模型结构
+    model = BertExtractor(bert_path)
     
-    # 如果有旧模型，加载继续练
-    if os.path.exists(MODEL_PATH):
-        print("加载已有模型权重...")
-        model.load_state_dict(torch.load(MODEL_PATH, map_location='cpu'))
+    # 如果有旧的训练权重，加载继续练
+    if os.path.exists(MODEL_WEIGHTS_PATH):
+        print("加载已有微调权重...")
+        model.load_state_dict(torch.load(MODEL_WEIGHTS_PATH, map_location='cpu'))
         
     optimizer = optim.AdamW(model.parameters(), lr=LR)
     criterion = WeightedBCELoss(pos_weight=6.0)
-    
     best_loss = float('inf')
     
     for epoch in range(EPOCHS):
@@ -247,21 +227,13 @@ def run_train():
         
         for batch in pbar:
             optimizer.zero_grad()
-            
-            input_ids = batch['input_ids']
-            mask = batch['attention_mask']
-            labels = batch['labels']
-            
-            preds = model(input_ids, mask)
-            loss = criterion(preds, labels, mask)
-            
+            preds = model(batch['input_ids'], batch['attention_mask'])
+            loss = criterion(preds, batch['labels'], batch['attention_mask'])
             loss.backward()
             optimizer.step()
-            
             total_loss += loss.item()
             pbar.set_postfix(loss=f"{loss.item():.4f}")
             
-        # 验证
         model.eval()
         val_loss = 0
         with torch.no_grad():
@@ -275,7 +247,7 @@ def run_train():
         
         if avg_val < best_loss:
             best_loss = avg_val
-            torch.save(model.state_dict(), MODEL_PATH)
+            torch.save(model.state_dict(), MODEL_WEIGHTS_PATH)
             print(" >> 模型已保存 (Best)")
 
 # --- 预测流程 ---
@@ -283,10 +255,7 @@ def predict_single(raw_path, model, tokenizer):
     if not raw_path.strip() or raw_path.startswith('#'): return
     raw_path = raw_path.strip()
 
-    # 1. 预处理
     text_for_bert = TextUtils.preprocess_for_bert(raw_path)
-    
-    # 2. 推理
     inputs = tokenizer(
         text_for_bert,
         return_tensors="pt",
@@ -299,9 +268,8 @@ def predict_single(raw_path, model, tokenizer):
         probs = model(inputs['input_ids'], inputs['attention_mask'])[0].numpy()
         
     offset_mapping = inputs['offset_mapping'][0].numpy()
-    
-    # 3. 映射回字符 mask
     char_mask = np.zeros(len(raw_path), dtype=bool)
+    
     for i, prob in enumerate(probs):
         if prob > THRESHOLD:
             start, end = offset_mapping[i]
@@ -309,59 +277,38 @@ def predict_single(raw_path, model, tokenizer):
             if end <= len(raw_path):
                 char_mask[start:end] = True
                 
-    # 4. 提取与合并 (Gap Filling)
-    # 如果提取出的字符中间只隔了 1-2 个字符，且那些字符是标点/空格，则连起来
-    # 例如: "Iron" [True] "." [False] "Man" [True] -> "Iron.Man"
-    
     final_res = ""
     true_indices = np.where(char_mask)[0]
-    
     if len(true_indices) > 0:
         groups = []
         curr_grp = [true_indices[0]]
-        
         for i in range(1, len(true_indices)):
-            prev = true_indices[i-1]
-            curr = true_indices[i]
-            
-            # Gap Filling 逻辑：
-            # 如果中间断开小于4个字符，并且断开的部分没有字母数字（只是符号）
-            # 或者断开部分包含 & : - 等强连接符
-            gap_len = curr - prev
+            prev, curr = true_indices[i-1], true_indices[i]
             gap_str = raw_path[prev+1:curr]
-            
-            is_gap_safe = not any(c.isalnum() for c in gap_str) # 只有标点
-            
-            if gap_len < 5 and is_gap_safe:
+            if (curr - prev) < 5 and not any(c.isalnum() for c in gap_str):
                 curr_grp.append(curr)
             else:
                 groups.append(curr_grp)
                 curr_grp = [curr]
         groups.append(curr_grp)
         
-        # 取最长的一组 (通常电影名最长)
         best_grp = max(groups, key=len)
-        
-        # 从该组的第一个字符到最后一个字符，从原字符串截取
-        start_idx = best_grp[0]
-        end_idx = best_grp[-1] + 1
-        raw_extract = raw_path[start_idx:end_idx]
-        
+        raw_extract = raw_path[best_grp[0]:best_grp[-1] + 1]
         final_res = TextUtils.cleanup_result(raw_extract)
 
-    # 输出
-    if final_res:
-        print(f"{raw_path}#{final_res}")
-    else:
-        print(f"{raw_path}#")
+    print(f"{raw_path}#{final_res}" if final_res else f"{raw_path}#")
 
-def load_model():
-    if not os.path.exists(MODEL_PATH):
+def load_model_for_inference():
+    if not os.path.exists(MODEL_WEIGHTS_PATH):
         print("请先运行训练 (python main.py train)")
         return None, None
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-    model = BertExtractor(MODEL_NAME)
-    model.load_state_dict(torch.load(MODEL_PATH, map_location='cpu'))
+    
+    # 关键：预测时也直接加载本地的基础模型，不联网
+    bert_path = get_bert_path()
+    
+    tokenizer = AutoTokenizer.from_pretrained(bert_path)
+    model = BertExtractor(bert_path)
+    model.load_state_dict(torch.load(MODEL_WEIGHTS_PATH, map_location='cpu'))
     model.eval()
     return model, tokenizer
 
@@ -372,7 +319,7 @@ if __name__ == "__main__":
         if cmd == 'train':
             run_train()
         else:
-            model, tok = load_model()
+            model, tok = load_model_for_inference()
             if model:
                 if os.path.isfile(cmd):
                     with open(cmd, 'r', encoding='utf-8') as f:
