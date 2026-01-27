@@ -13,27 +13,29 @@ import glob
 from transformers import AutoTokenizer, AutoModel, logging
 
 # --- 配置区 ---
+# 1. 屏蔽 HuggingFace 的啰嗦警告
 logging.set_verbosity_error()
+import warnings
+warnings.filterwarnings("ignore")
+
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-# 核心配置
+# 2. 核心配置
 NUM_THREADS = 4       
 BATCH_SIZE = 32       
 LR = 5e-5             
 EPOCHS = 10           
 MAX_LEN = 128         
 
-# === 模型路径配置 (关键修改) ===
-# 基础预训练模型名称 (网上下载的源头)
 BERT_HF_NAME = "prajjwal1/bert-tiny" 
-# 本地保存的基础模型文件夹 (下载一次后就存这儿)
 BERT_LOCAL_FOLDER = "bert_base_local"
-# 我们训练好的权重文件
 MODEL_WEIGHTS_PATH = "movie_model_bert.pth"
-
 DATA_FILE_PATTERN = "train_data*.txt"
 SEED = 42
+
+# 3. 预测配置
 THRESHOLD = 0.5       
+DEBUG_MODE = False    # 默认关闭，可以通过在目录下创建 'dbg' 文件来开启
 
 torch.set_num_threads(NUM_THREADS)
 
@@ -47,7 +49,9 @@ class TextUtils:
     @staticmethod
     def preprocess_for_bert(text):
         if not text: return ""
+        # 1. 消除分隔符干扰
         text = re.sub(r'[._]', ' ', text)
+        # 2. 保留白名单字符，其他变空格 (保持长度不变)
         chars = r'a-zA-Z0-9\u4e00-\u9fa5'
         puncts = r'\[\]\(\)\{\}\-\'\"\:!&' 
         cn_puncts = r'【】（）《》：'
@@ -62,29 +66,18 @@ class TextUtils:
         text = re.sub(r'\s+', ' ', text)
         return text
 
-# --- 自动下载并缓存 BERT 的逻辑 ---
+# --- 自动下载逻辑 ---
 def get_bert_path():
-    """
-    检查本地是否有 BERT 基础模型。
-    如果没有，从 HuggingFace 下载并保存到本地。
-    返回有效的模型路径。
-    """
     if os.path.exists(BERT_LOCAL_FOLDER) and os.listdir(BERT_LOCAL_FOLDER):
-        # 文件夹存在且不为空，说明已经下载过了
         return BERT_LOCAL_FOLDER
     else:
-        print(f"检测到本地无基础模型，正在从 {BERT_HF_NAME} 下载...")
+        print(f"正在从 {BERT_HF_NAME} 下载基础模型...")
         try:
-            # 下载 Tokenizer 和 Model
             tokenizer = AutoTokenizer.from_pretrained(BERT_HF_NAME)
             model = AutoModel.from_pretrained(BERT_HF_NAME)
-            
-            # 保存到本地文件夹
             os.makedirs(BERT_LOCAL_FOLDER, exist_ok=True)
             tokenizer.save_pretrained(BERT_LOCAL_FOLDER)
             model.save_pretrained(BERT_LOCAL_FOLDER)
-            
-            print(f"基础模型已保存到: {BERT_LOCAL_FOLDER} (以后不再联网下载)")
             return BERT_LOCAL_FOLDER
         except Exception as e:
             print(f"下载失败: {e}")
@@ -94,7 +87,6 @@ def get_bert_path():
 class BertExtractor(nn.Module):
     def __init__(self, model_path):
         super().__init__()
-        # 这里传入的是本地路径
         self.bert = AutoModel.from_pretrained(model_path)
         self.hidden_size = self.bert.config.hidden_size 
         self.classifier = nn.Sequential(
@@ -168,7 +160,7 @@ class MovieDataset(Dataset):
             'labels': labels
         }
 
-# --- 损失函数 ---
+# --- Loss ---
 class WeightedBCELoss(nn.Module):
     def __init__(self, pos_weight=6.0):
         super().__init__()
@@ -180,15 +172,12 @@ class WeightedBCELoss(nn.Module):
         loss = loss * weights * mask
         return loss.sum() / (mask.sum() + 1e-6)
 
-# --- 训练流程 ---
+# --- 训练 ---
 def run_train():
     set_seed(SEED)
-    
-    # 1. 获取 BERT 基础模型路径 (只下载一次)
     bert_path = get_bert_path()
     tokenizer = AutoTokenizer.from_pretrained(bert_path)
 
-    # 读取数据
     data_files = glob.glob(DATA_FILE_PATTERN)
     if not data_files:
         print("未找到训练数据 train_data*.txt"); return
@@ -208,12 +197,9 @@ def run_train():
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=min(2, NUM_THREADS))
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False)
     
-    # 2. 从本地加载模型结构
     model = BertExtractor(bert_path)
-    
-    # 如果有旧的训练权重，加载继续练
     if os.path.exists(MODEL_WEIGHTS_PATH):
-        print("加载已有微调权重...")
+        print("加载已有权重...")
         model.load_state_dict(torch.load(MODEL_WEIGHTS_PATH, map_location='cpu'))
         
     optimizer = optim.AdamW(model.parameters(), lr=LR)
@@ -223,8 +209,7 @@ def run_train():
     for epoch in range(EPOCHS):
         model.train()
         total_loss = 0
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS}")
-        
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}")
         for batch in pbar:
             optimizer.zero_grad()
             preds = model(batch['input_ids'], batch['attention_mask'])
@@ -250,11 +235,12 @@ def run_train():
             torch.save(model.state_dict(), MODEL_WEIGHTS_PATH)
             print(" >> 模型已保存 (Best)")
 
-# --- 预测流程 ---
+# --- 预测 (含 Debug 输出) ---
 def predict_single(raw_path, model, tokenizer):
     if not raw_path.strip() or raw_path.startswith('#'): return
     raw_path = raw_path.strip()
 
+    # 1. 预处理 & Tokenize
     text_for_bert = TextUtils.preprocess_for_bert(raw_path)
     inputs = tokenizer(
         text_for_bert,
@@ -264,27 +250,63 @@ def predict_single(raw_path, model, tokenizer):
         max_length=MAX_LEN
     )
     
+    # 2. 推理
     with torch.no_grad():
         probs = model(inputs['input_ids'], inputs['attention_mask'])[0].numpy()
         
     offset_mapping = inputs['offset_mapping'][0].numpy()
-    char_mask = np.zeros(len(raw_path), dtype=bool)
+    
+    # 3. 将 Token 级概率映射回 字符级
+    char_scores = np.zeros(len(raw_path))          # 存储每个字符的分数 (用于Debug)
+    char_mask = np.zeros(len(raw_path), dtype=bool) # 存储每个字符是否被选中
     
     for i, prob in enumerate(probs):
+        start, end = offset_mapping[i]
+        if start == end: continue # 跳过 [CLS], [SEP]
+        if end > len(raw_path): continue
+        
+        # 将该 Token 的概率赋值给对应的字符区间
+        # 注意：这里会覆盖，但因为我们是1对1替换，区间通常不会重叠
+        char_scores[start:end] = prob
+        
         if prob > THRESHOLD:
-            start, end = offset_mapping[i]
-            if start == end: continue
-            if end <= len(raw_path):
-                char_mask[start:end] = True
-                
+            char_mask[start:end] = True
+    
+    # --- Debug 打印区域 ---
+    if DEBUG_MODE:
+        print(f"\n{'='*60}")
+        print(f"原始路径: {raw_path}")
+        print("-" * 60)
+        print(f"{'Idx':<4} | {'Char':<4} | {'Score':<8} | {'Status'}")
+        print("-" * 60)
+        
+        for i, char in enumerate(raw_path):
+            score = char_scores[i]
+            # 简单的视觉标记：分数高显示绿色对勾，低则空
+            status = "✅" if score > THRESHOLD else "  "
+            
+            # 过滤掉分数极低的字符显示，防止刷屏（可选）
+            # if score < 0.01: continue 
+            
+            # 打印
+            # 处理换行符等不可见字符的显示
+            display_char = char if char.isprintable() else '?'
+            print(f"{i:<4} | {display_char:<4} | {score:.4f}   | {status}")
+            
+        print(f"{'='*60}\n")
+    # ---------------------
+
+    # 4. 后处理 (Gap Filling)
     final_res = ""
     true_indices = np.where(char_mask)[0]
+    
     if len(true_indices) > 0:
         groups = []
         curr_grp = [true_indices[0]]
         for i in range(1, len(true_indices)):
             prev, curr = true_indices[i-1], true_indices[i]
             gap_str = raw_path[prev+1:curr]
+            # 如果断开的部分很短且不是字母数字（是标点），则连起来
             if (curr - prev) < 5 and not any(c.isalnum() for c in gap_str):
                 curr_grp.append(curr)
             else:
@@ -296,16 +318,16 @@ def predict_single(raw_path, model, tokenizer):
         raw_extract = raw_path[best_grp[0]:best_grp[-1] + 1]
         final_res = TextUtils.cleanup_result(raw_extract)
 
-    print(f"{raw_path}#{final_res}" if final_res else f"{raw_path}#")
+    if final_res:
+        print(f"{raw_path}#{final_res}")
+    else:
+        print(f"{raw_path}#")
 
 def load_model_for_inference():
     if not os.path.exists(MODEL_WEIGHTS_PATH):
-        print("请先运行训练 (python main.py train)")
+        print("请先训练: python main.py train")
         return None, None
-    
-    # 关键：预测时也直接加载本地的基础模型，不联网
     bert_path = get_bert_path()
-    
     tokenizer = AutoTokenizer.from_pretrained(bert_path)
     model = BertExtractor(bert_path)
     model.load_state_dict(torch.load(MODEL_WEIGHTS_PATH, map_location='cpu'))
@@ -313,7 +335,11 @@ def load_model_for_inference():
     return model, tokenizer
 
 if __name__ == "__main__":
-    import sys
+    # 检测当前目录是否有 'dbg' 文件，有则开启 Debug 模式
+    if os.path.exists("dbg"):
+        DEBUG_MODE = True
+        print(">> 检测到 'dbg' 文件，已开启调试详情模式 <<")
+
     if len(sys.argv) > 1:
         cmd = sys.argv[1]
         if cmd == 'train':
