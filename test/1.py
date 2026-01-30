@@ -3,8 +3,8 @@ from transformers import pipeline
 # 构建QA pipeline，核心配置model_kwargs/tokenizer_kwargs
 qa_pipeline = pipeline(
     task="question-answering",
-    model="uer/roberta-large-chinese-qa",  # 推荐QA微调模型，解决权重缺失
-    tokenizer="uer/roberta-large-chinese-qa",
+    model="uer/roberta-base-chinese-extractive-qa",  # 推荐QA微调模型，解决权重缺失
+    tokenizer="uer/roberta-base-chinese-extractive-qa",
     # 模型相关配置：离线+屏蔽讨论区
     model_kwargs={
         "local_files_only": True,  # 彻底禁止访问HF，仅读本地
