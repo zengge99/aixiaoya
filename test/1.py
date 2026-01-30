@@ -5,16 +5,6 @@ qa_pipeline = pipeline(
     task="question-answering",
     model="uer/roberta-base-chinese-extractive-qa",  # 推荐QA微调模型，解决权重缺失
     tokenizer="uer/roberta-base-chinese-extractive-qa",
-    # 模型相关配置：离线+屏蔽讨论区
-    model_kwargs={
-        "local_files_only": True,  # 彻底禁止访问HF，仅读本地
-        "use_auth_token": False,
-        "ignore_discussions": True  # 解决403 Forbidden讨论区报错
-    },
-    # 分词器相关配置：离线
-    tokenizer_kwargs={
-        "local_files_only": True
-    }
 )
 
 # 测试使用
