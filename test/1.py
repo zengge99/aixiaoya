@@ -1,8 +1,11 @@
 from transformers import pipeline
 
-classifier = pipeline("zero-shot-classification")
-result = classifier(
-"九龙城寨之围城 蓝光原盘[国粤双语] [中英双字 国配中字 官译中字]",
-candidate_labels=["movie", "education", "politics", "business"],
-)
-print(result)
+generator = pipeline("text-generation")
+results = generator("In this course, we will teach you how to")
+print(results)
+results = generator(
+    "In this course, we will teach you how to",
+    num_return_sequences=2,
+    max_length=50
+) 
+print(results)
