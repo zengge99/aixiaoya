@@ -4,8 +4,8 @@ from transformers import pipeline
 # model选用hfl/chinese-roberta-wwm-ext-large-squad2，中文问答效果优、轻量易下载
 question_answerer = pipeline(
     task="question-answering",
-    model="hfl/chinese-roberta-wwm-ext-large-squad2",
-    tokenizer="hfl/chinese-roberta-wwm-ext-large-squad2"
+    model="hfl/chinese-roberta-wwm-ext-large",
+    tokenizer="hfl/chinese-roberta-wwm-ext-large"
 )
 
 # 中文问答测试：问题+上下文（核心规则：答案必须在上下文中，问答任务是“从上下文提取答案”）
