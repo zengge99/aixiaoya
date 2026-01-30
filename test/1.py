@@ -3,8 +3,8 @@ from transformers import pipeline
 # 构建QA pipeline，核心配置model_kwargs/tokenizer_kwargs
 qa_pipeline = pipeline(
     task="question-answering",
-    model="uer/roberta-base-chinese-extractive-qa",  # 推荐QA微调模型，解决权重缺失
-    tokenizer="uer/roberta-base-chinese-extractive-qa"
+    model="~/.cache/huggingface/transformers/uer/roberta-base-chinese-extractive-qa",  # 推荐QA微调模型，解决权重缺失
+    tokenizer="~/.cache/huggingface/transformers/uer/roberta-base-chinese-extractive-qa"
 )
 
 # 测试使用
