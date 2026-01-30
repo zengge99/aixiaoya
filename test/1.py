@@ -2,11 +2,10 @@ from transformers import pipeline
 import os
 import re
 
-# 核心替换：使用可正常下载的中文NER模型，aggregation_strategy合并连续实体
 ner = pipeline(
     task="ner",
-    model="dslim/bert-base-chinese-ner",  # 可用的中文NER模型
-    aggregation_strategy="max"  # 关键：把连续的影片名字符合并成一个实体，避免拆分
+    model="hfl/chinese-roberta-wwm-ext-ner",  # 更轻量的中文NER模型
+    aggregation_strategy="max"
 )
 
 # 路径简单清洗：先去掉网址、后缀、特殊符号，减少模型干扰（提升识别精度）
