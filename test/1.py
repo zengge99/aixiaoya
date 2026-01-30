@@ -4,11 +4,7 @@ from transformers import pipeline
 qa_pipeline = pipeline(
     task="question-answering",
     model="uer/roberta-base-chinese-extractive-qa",  # 推荐QA微调模型，解决权重缺失
-    tokenizer="uer/roberta-base-chinese-extractive-qa",
-    # 模型相关配置：离线+屏蔽讨论区
-    model_kwargs={
-        "local_files_only": True
-    }
+    tokenizer="uer/roberta-base-chinese-extractive-qa"
 )
 
 # 测试使用
