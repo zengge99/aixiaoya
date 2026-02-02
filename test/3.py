@@ -2,9 +2,8 @@ import fsspec
 import py7zr
 import io
 import sys
-import os
 
-# 保留原有偏移量文件包装类，无需修改
+# 处理 115 等特殊偏移量的文件包装器
 class OffsetFileWrapper(io.IOBase):
     def __init__(self, raw_file, offset):
         self.raw_file = raw_file
@@ -29,119 +28,89 @@ class OffsetFileWrapper(io.IOBase):
     def seekable(self): return True
     def readable(self): return True
 
-# 新增：纯内存解压单个文件的核心函数（最老py7zr兼容）
-def extract_single_file_to_memory(archive, filename):
-    """
-    定向解压7z中单个文件到内存字节流，返回字节数据
-    :param archive: 已打开的SevenZipFile对象
-    :param filename: 压缩包内的文件相对路径
-    :return: 字节数据/None
-    """
-    try:
-        # 核心：创建内存字节流，作为解压目标
-        bio = io.BytesIO()
-        # 调用py7zr最底层的解压方法，定向解压单个文件到内存流
-        # 适配所有py7zr版本的核心extract逻辑
-        archive.extract(targets=[filename], path=bio)
-        # 重置内存流指针到开头
-        bio.seek(0)
-        # 拼接内存流中的实际文件路径
-        file_path = os.path.join(bio.name, filename)
-        # 读取文件字节数据
-        with open(file_path, 'rb') as f:
-            data = f.read()
-        # 清理内存临时文件
-        os.remove(file_path)
-        bio.close()
-        return data
-    except Exception as e:
-        # 捕获单文件错误，不影响整体
-        return None
+# 核心：内存高效的提取工厂
+class StrmExtractorFactory:
+    def __init__(self, output_handle, total_count):
+        self.output_handle = output_handle
+        self.total_count = total_count
+        self.current_count = 0
 
-def process_masked_7z_strm(url, offset, output_file="strm_out.txt", batch_size=1000):
-    """
-    修复0条写入 | 最老py7zr兼容 | 纯内存提取 | 不解压到磁盘 | 26万strm适配
-    """
+    def get_target(self, member):
+        """每当 py7zr 准备提取一个文件时，会调用此方法"""
+        # 返回一个 BytesIO 作为临时中转，用于接收当前这一个文件的内容
+        return self.StrmFileBuffer(member.filename, self)
+
+    class StrmFileBuffer(io.BytesIO):
+        """内部类：负责接收单个文件数据，并在提取完成后立即写入最终文件"""
+        def __init__(self, filename, outer_factory):
+            super().__init__()
+            self.filename = filename
+            self.outer = outer_factory
+
+        def close(self):
+            """当 py7zr 完成当前文件的解压写入后，会调用 close()"""
+            raw_content = self.getvalue()
+            if raw_content:
+                # 尝试解码
+                try:
+                    content = raw_content.decode('utf-8').strip()
+                except:
+                    content = raw_content.decode('gbk', errors='ignore').strip()
+                
+                # 立即写入最终文件，释放内存
+                self.outer.output_handle.write(f"{self.filename}#{content}\n")
+            
+            self.outer.current_count += 1
+            if self.outer.current_count % 5000 == 0:
+                print(f"已处理 {self.outer.current_count} / {self.outer.total_count} 个文件...")
+            
+            super().close()
+
+def process_masked_7z_strm(url, offset, output_file="strm_out.txt"):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer": "https://115.com",
     }
 
     print(f"正在连接服务器，跳过偏移量 ({offset} 字节)...")
-    total_strm = 0
-    total_written = 0
-    fail_count = 0
-
+    
     try:
+        # 1. 打开远程文件
         with fsspec.open(url, "rb", headers=headers) as remote_file:
             wrapped_file = OffsetFileWrapper(remote_file, offset)
-            # 打开7z文件（全程保持打开，避免重复连接）
+            
+            # 2. 打开 7z 索引
             with py7zr.SevenZipFile(wrapped_file, mode='r') as archive:
                 print("成功读取索引，正在检索文件名...")
                 all_files = archive.getnames()
-                # 过滤strm文件，同时去重+过滤空路径
-                strm_targets = [
-                    f for f in all_files 
-                    if f and f.lower().endswith('.strm') and os.path.basename(f)
-                ]
+                strm_targets = [f for f in all_files if f.lower().endswith('.strm')]
+                
                 total_strm = len(strm_targets)
-
                 if total_strm == 0:
-                    print("未找到 .strm 文件，任务结束。")
+                    print("未找到 .strm 文件。")
                     return
 
-                print(f"找到 {total_strm} 个 .strm 文件 | 纯内存逐文件提取（每批{batch_size}条）...")
-                # 清空输出文件
-                open(output_file, "w", encoding="utf-8").close()
+                print(f"找到 {total_strm} 个 .strm 文件。")
+                print("正在流式提取（内存友好模式）...")
 
-                with open(output_file, "a", encoding="utf-8") as f_out:
-                    for idx, filename in enumerate(strm_targets):
-                        # 纯内存提取单个文件
-                        raw_data = extract_single_file_to_memory(archive, filename)
-                        if raw_data is None or len(raw_data) == 0:
-                            fail_count += 1
-                            continue
-                        
-                        # 编码兼容处理（保持原有逻辑）
-                        try:
-                            content = raw_data.decode('utf-8').strip()
-                        except Exception:
-                            content = raw_data.decode('gbk', errors='ignore').strip()
-                        
-                        # 写入文件（原格式：文件名#内容）
-                        f_out.write(f"{filename}#{content}\n")
-                        total_written += 1
-
-                        # 分批打印进度
-                        if total_written % batch_size == 0:
-                            print(f"进度：{total_written} / {total_strm} | 失败：{fail_count}")
-                    
-                    # 打印最终批次进度
-                    if total_written % batch_size != 0:
-                        print(f"进度：{total_written} / {total_strm} | 失败：{fail_count}")
-
-                # 最终统计
-                print(f"\n✅ 处理完成！")
-                print(f"📊 统计：共找到{total_strm}个strm文件 | 成功写入{total_written}条 | 读取失败{fail_count}条")
-                print(f"📁 结果文件：{os.path.abspath(output_file)} | 文件大小：{os.path.getsize(output_file)/1024/1024:.2f}MB")
+                # 3. 创建输出文件并开始流式解压
+                with open(output_file, "w", encoding="utf-8") as f_out:
+                    # 初始化工厂
+                    factory = StrmExtractorFactory(f_out, total_strm)
+                    # 执行提取：py7zr 会逐个解压 targets 中的文件，并通过 factory 处理
+                    archive.extract(targets=strm_targets, factory=factory)
+                
+                print(f"处理成功！所有数据已保存至 {output_file}。")
 
     except Exception as e:
-        print(f"\n❌ 全局错误: {e}")
+        print(f"\n发生错误: {e}")
         import traceback
         traceback.print_exc()
-        sys.exit(1)
 
 if __name__ == "__main__":
-    # ==================== 仅修改这1行！====================
-    TARGET_URL = "你的远程7z文件下载链接"  # 替换为实际链接
-    # =====================================================
-    REAL_OFFSET = 370745    # 偏移量，无需修改
-    BATCH_SIZE = 1000       # 每批打印进度，内存大调2000/5000
-    OUTPUT_FILE = "strm_out.txt"  # 输出文件名
-
-    process_masked_7z_strm(
-        url=TARGET_URL,
-        offset=REAL_OFFSET,
-        output_file=OUTPUT_FILE,
-        batch_size=BATCH_SIZE
-    )
+    # 配置区
+    TARGET_URL = "你的下载链接"
+    REAL_OFFSET = 370745
+    OUTPUT_NAME = "strm_out.txt"
+    
+    process_masked_7z_strm(TARGET_URL, REAL_OFFSET, OUTPUT_NAME)
