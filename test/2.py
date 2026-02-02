@@ -77,5 +77,5 @@ def list_masked_7z(url):
 
 if __name__ == "__main__":
     # 使用你提供的 URL
-    url = "https://cdnfhnfile.115cdn.net/696b8ca0372d5bff49ca203b001741f315f0a042/115_20260202_153831.mp4?t=1772497203&u=334875423&s=524288000&d=vip-795368560-cq5tpbmhwf8epdmp4-1-0&c=2&f=1&k=00a45ce0b9b3f5619652b70dbcd9959c&us=5242880000&uc=10&v=1"
+    url = ""
     list_masked_7z(url)
