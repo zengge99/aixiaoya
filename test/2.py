@@ -55,7 +55,8 @@ def process_masked_7z_strm(url, offset, output_file="strm_out.txt"):
 
                 # 提取数据
                 # 注意：26万个文件在这里可能会消耗大量内存和时间
-                extracted_data = archive.read(strm_targets)
+                #extracted_data = archive.read(strm_targets)
+                extracted_data = archive.read(['sss'])
                 
                 print(f"提取完成，正在写入文件 {output_file}...")
                 
