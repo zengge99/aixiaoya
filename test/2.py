@@ -50,7 +50,7 @@ def list_masked_7z(url):
         with fsspec.open(url, "rb", headers=headers) as remote_file:
             
             # 2. 扫描前 10MB 寻找 7z 签名 (通常伪装头不会超过这个范围)
-            search_range = 10 * 1024 * 1024 
+            search_range = 200 * 1024 * 1024 
             initial_data = remote_file.read(search_range)
             
             real_start = initial_data.find(SEVENZ_SIGNATURE)
