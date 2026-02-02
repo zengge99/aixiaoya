@@ -1,27 +1,32 @@
-from remotezip import RemoteZip
+import py7zr
+from httpio import httpreader
 import requests
 
-def list_remote_zip(url):
-    try:
-        # remotezip 底层使用 requests.get()，默认 allow_redirects=True
-        # 因此 302 跳转会被自动处理。
-        # 对于 50GB 的大文件，remotezip 只会请求几百 KB 的元数据。
-        with RemoteZip(url) as rz:
-            print(f"成功连接到文件。正在解析目录结构...\n")
-            
-            # 打印类似于 'unzip -l' 的列表结构
-            rz.printdir()
-            
-            # 如果你需要以列表形式处理，可以使用 infolist()
-            # for file_info in rz.infolist():
-            #     print(f"文件名: {file_info.filename}, 大小: {file_info.file_size} bytes")
+def list_remote_7z(url):
+    # 1. 处理 302 重定向并获取最终 URL（可选，httpio 内部通常也能处理）
+    # 但显式处理可以确保我们拿到最终地址
+    response = requests.head(url, allow_redirects=True)
+    final_url = response.url
+    print(f"最终访问地址: {final_url}")
 
-    except requests.exceptions.HTTPError as e:
-        print(f"HTTP 错误: {e}")
+    try:
+        # 2. 使用 httpio 创建一个远程文件句柄
+        # 它支持随机读取 (seekable)，这对于读取 7z 的元数据至关重要
+        with httpreader(final_url) as remote_file:
+            # 3. 将远程文件句柄传给 py7zr
+            with py7zr.SevenZipFile(remote_file, mode='r') as archive:
+                print("成功读取元数据，目录结构如下：\n")
+                
+                # 获取所有文件信息
+                for file_info in archive.list():
+                    # 打印文件名和原始大小
+                    # file_info 包含 filename, uncompressed, compressed 等属性
+                    print(f"{file_info.filename:<50} {file_info.uncompressed:>12} bytes")
+
     except Exception as e:
-        print(f"发生错误: {e}")
+        print(f"解析失败: {e}")
 
 if __name__ == "__main__":
-    # 替换为你的 50GB HTTP 下载链接
-    zip_url = "http://example.com/very_large_file.zip"
-    list_remote_zip(zip_url)
+    # 替换为你的 50GB 7z 文件链接
+    target_url = "http://example.com/large_archive.7z"
+    list_remote_7z(target_url)
