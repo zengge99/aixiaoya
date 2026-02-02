@@ -53,20 +53,9 @@ def process_masked_7z_strm(url, offset, output_file="strm_out.txt"):
                 print(f"找到 {total_strm} 个 .strm 文件。")
                 print("正在提取内容（文件较多，请耐心等待，这可能需要较长时间）...")
 
-                # 兼容性处理：尝试不同的读取方法
-                extract_func = None
-                if hasattr(archive, 'read'):
-                    extract_func = archive.read
-                elif hasattr(archive, 'get_data'):
-                    extract_func = archive.get_data
-                
-                if extract_func is None:
-                    print("错误: 无法在 py7zr 中找到读取方法，请尝试运行 'pip install --upgrade py7zr'")
-                    return
-
                 # 提取数据
                 # 注意：26万个文件在这里可能会消耗大量内存和时间
-                extracted_data = extract_func(targets=strm_targets)
+                extracted_data = archive.read(targets=strm_targets)
                 
                 print(f"提取完成，正在写入文件 {output_file}...")
                 
