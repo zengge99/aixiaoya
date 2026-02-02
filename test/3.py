@@ -63,7 +63,7 @@ def process_masked_7z_strm(url, offset, output_file="strm_out.txt", batch_size=1
 
                 with open(output_file, "a", encoding="utf-8") as f_out:
                     # 遍历7z底层文件流，仅处理strm文件，纯内存读取
-                    for entry in archive.archive.getmembers():
+                    for entry in archive.getmembers():
                         # 过滤非strm文件和不在目标列表的文件
                         if not entry.filename.lower().endswith('.strm') or entry.filename not in strm_targets:
                             continue
