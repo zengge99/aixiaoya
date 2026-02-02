@@ -1,9 +1,9 @@
 import fsspec
 import py7zr
 import io
-# 导入高层 API
-from py7zr import extract_7z_archive
+import sys
 
+# 尝试解决版本兼容性问题
 class OffsetFileWrapper(io.IOBase):
     def __init__(self, raw_file, offset):
         self.raw_file = raw_file
@@ -37,58 +37,63 @@ def process_masked_7z_strm(url, offset, output_file="strm_out.txt"):
     print(f"正在连接服务器，跳过偏移量 ({offset} 字节)...")
     
     try:
-        # 1. 使用 fsspec 打开远程文件
         with fsspec.open(url, "rb", headers=headers) as remote_file:
-            
-            # 2. 包装文件流
             wrapped_file = OffsetFileWrapper(remote_file, offset)
             
-            # 3. 先通过 SevenZipFile 获取文件列表
-            print("正在读取索引以匹配 .strm 文件...")
             with py7zr.SevenZipFile(wrapped_file, mode='r') as archive:
+                print("成功读取索引，正在检索文件名...")
                 all_files = archive.getnames()
                 strm_targets = [f for f in all_files if f.lower().endswith('.strm')]
-            
-            total_strm = len(strm_targets)
-            if total_strm == 0:
-                print("未找到 .strm 文件。")
-                return
-            
-            print(f"找到 {total_strm} 个目标文件。")
-            
-            # --- 关键修改：回到起点，使用 extract_7z_archive 处理内存流 ---
-            wrapped_file.seek(0) 
-            print("正在通过内存提取数据（不落地磁盘）...")
-            
-            # extract_7z_archive 直接接受 file-like object (wrapped_file)
-            # targets 参数指定只解压我们需要的文件
-            # 返回值格式：{文件名: BytesIO内容}
-            extracted_data = extract_7z_archive(wrapped_file, targets=strm_targets)
-            
-            # 4. 写入结果文件
-            print(f"提取完成，正在格式化并写入 {output_file}...")
-            count = 0
-            with open(output_file, "w", encoding="utf-8") as f_out:
-                for name in strm_targets:
-                    if name in extracted_data:
-                        # 从 BytesIO 中读取字节并解码
-                        raw_bytes = extracted_data[name].getbuffer()
-                        try:
-                            content = raw_bytes.tobytes().decode('utf-8').strip()
-                        except:
-                            content = raw_bytes.tobytes().decode('gbk', errors='ignore').strip()
-                        
-                        f_out.write(f"{name}#{content}\n")
-                        count += 1
-            
-            print(f"处理成功！已完成 {count} 个文件的内容提取。")
+                
+                total_strm = len(strm_targets)
+                if total_strm == 0:
+                    print("未找到 .strm 文件。")
+                    return
+
+                print(f"找到 {total_strm} 个 .strm 文件。")
+                print("正在提取内容（文件较多，请耐心等待，这可能需要较长时间）...")
+
+                # 兼容性处理：尝试不同的读取方法
+                extract_func = None
+                if hasattr(archive, 'read'):
+                    extract_func = archive.read
+                elif hasattr(archive, 'get_data'):
+                    extract_func = archive.get_data
+                
+                if extract_func is None:
+                    print("错误: 无法在 py7zr 中找到读取方法，请尝试运行 'pip install --upgrade py7zr'")
+                    return
+
+                # 提取数据
+                # 注意：26万个文件在这里可能会消耗大量内存和时间
+                extracted_data = extract_func(targets=strm_targets)
+                
+                print(f"提取完成，正在写入文件 {output_file}...")
+                
+                count = 0
+                with open(output_file, "w", encoding="utf-8") as f_out:
+                    for name in strm_targets:
+                        if name in extracted_data:
+                            raw_content = extracted_data[name].read()
+                            try:
+                                content = raw_content.decode('utf-8').strip()
+                            except:
+                                content = raw_content.decode('gbk', errors='ignore').strip()
+                            
+                            f_out.write(f"{name}#{content}\n")
+                            count += 1
+                            if count % 10000 == 0:
+                                print(f"已写入 {count} / {total_strm} 条记录...")
+                
+                print(f"处理成功！总计写入 {count} 条数据。")
 
     except Exception as e:
-        print(f"\n解析失败: {e}")
+        print(f"\n发生错误: {e}")
         import traceback
         traceback.print_exc()
 
 if __name__ == "__main__":
+    # 请确保已替换为实际链接
     TARGET_URL = "你的下载链接"
     REAL_OFFSET = 370745
     
