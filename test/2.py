@@ -1,30 +1,23 @@
-import fsspec
-import py7zr
+import requests
 
-def list_remote_7z(url):
-    print(f"正在连接到远程服务器...")
-    
-    try:
-        # 1. 使用 fsspec 打开远程 URL
-        # fsspec 会自动处理 302 重定向
-        # 'rb' 模式配合 fsspec 会创建一个支持随机访问 (seek) 的远程文件对象
-        with fsspec.open(url, "rb") as remote_file:
-            
-            print("正在读取 7z 索引块 (仅下载必要部分)...")
-            
-            # 2. 将此文件对象直接传给 py7zr
-            with py7zr.SevenZipFile(remote_file, mode='r') as archive:
-                print(f"{'文件名':<60} | {'原始大小 (Bytes)':>15}")
-                print("-" * 80)
-                
-                # 获取目录结构
-                for file_info in archive.list():
-                    print(f"{file_info.filename:<60} | {file_info.uncompressed:>15}")
-                    
-    except Exception as e:
-        print(f"发生错误: {e}")
+url = "你的下载链接"
+headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
 
-if __name__ == "__main__":
-    # 替换为你的 50GB 7z 下载链接
-    url = "http://example.com/your_huge_file.7z"
-    list_remote_7z(url)
+# 1. 检查服务器是否支持 Range
+resp = requests.get(url, headers=headers, stream=True, allow_redirects=True)
+print(f"最终 URL: {resp.url}")
+print(f"HTTP 状态码: {resp.status_code}")
+print(f"是否支持 Range: {resp.headers.get('Accept-Ranges')}")
+print(f"文件内容类型: {resp.headers.get('Content-Type')}")
+
+# 2. 读取前 6 个字节
+first_6_bytes = resp.raw.read(6)
+print(f"文件头十六进制: {first_6_bytes.hex()}")
+
+if first_6_bytes == b'7z\xbc\xaf\x27\x1c':
+    print("确认是标准的 7z 文件头！")
+else:
+    print("警告：这看起来不是一个 7z 文件。可能是 HTML 页面或被拦截了。")
+    print(f"前 6 字节转字符: {first_6_bytes}")
