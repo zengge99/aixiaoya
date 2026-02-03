@@ -21,11 +21,10 @@ task_queue = queue.Queue()
 visited_urls = set()
 visited_lock = threading.Lock()
 file_lock = threading.Lock()
-stats = {"files": 0, "dirs": 0, "discarded": 0}
+stats = {"files": 0, "dirs": 0, "failed": 0}
 stats_lock = threading.Lock()
 
 # 缓存目录探测结果
-# 格式: { "dir_url": {"has_tvshow": True/False, "tmdbid": "xxx", "title": "xxx", "year": "xxx"} }
 dir_nfo_cache = {}
 cache_lock = threading.Lock()
 
@@ -40,13 +39,25 @@ def get_session():
     return thread_local.session
 
 def get_xml_tag_text(root, tag):
-    """提取XML标签内容，支持多种tmdbid存储方式"""
+    """
+    全能XML提取：
+    1. 直接查找标签 (如 <tmdbid>123</tmdbid>)
+    2. 如果是tmdbid，额外查找 uniqueid[type=tmdb]
+    """
+    # 1. 直接查找
     node = root.find(tag)
     if node is not None and node.text:
         return node.text.strip()
+    
+    # 2. 针对 tmdbid 的特殊逻辑
     if tag in ["tmdbid", "tmdb"]:
+        # 查找 <uniqueid type="tmdb">
         for uid in root.findall('uniqueid'):
-            if uid.get('type') == 'tmdb':
+            if uid.get('type') == 'tmdb' and uid.text:
+                return uid.text.strip()
+        # 查找 <id type="tmdb">
+        for uid in root.findall('id'):
+            if uid.get('type') == 'tmdb' and uid.text:
                 return uid.text.strip()
     return ""
 
@@ -76,12 +87,12 @@ def parse_nfo_data(url):
     return None
 
 def extract_resolution(path):
-    """从路径提取分辨率"""
+    """从全路径提取分辨率"""
     match = re.search(r'(2160p|1080p|720p|4k|540p)', path, re.I)
     return match.group(0).lower() if match else ""
 
 def find_tv_root_context(strm_url):
-    """向上三级查找tvshow.nfo并返回元数据"""
+    """向上三级查找tvshow.nfo"""
     decoded_url = unquote(strm_url)
     rel_path = decoded_url.replace(BASE_URL.rstrip('/'), "").strip('/')
     parts = rel_path.split('/')
@@ -119,39 +130,34 @@ def find_tv_root_context(strm_url):
     return None, None
 
 def get_reconstructed_path(url):
-    """
-    重构路径逻辑。
-    返回新路径字符串，或者返回 None 表示应丢弃该文件。
-    """
+    """核心重构逻辑"""
     decoded_url = unquote(url)
     rel_path = decoded_url.replace(BASE_URL.rstrip('/'), "").strip('/')
     parts = rel_path.split('/')
-    if not parts: return None
+    if not parts: return rel_path
 
-    # 1. 探测是否为剧集
+    res = extract_resolution(url)
+
+    # 1. 判定是否为剧集
     root_idx, tv_info = find_tv_root_context(url)
 
     if root_idx is not None:
         # --- 剧集逻辑 ---
-        # 如果获取不到剧集的 tmdbid，直接丢弃
         tmdbid = tv_info.get("tmdbid")
-        if not tmdbid:
-            return None
-
+        
+        # 从同名nfo获取单集季集
         ep_nfo_url = url.rsplit('.', 1)[0] + ".nfo"
         ep_data = parse_nfo_data(ep_nfo_url)
         
-        # 季集判断
         s = ep_data.get("season") if ep_data else None
         e = ep_data.get("episode") if ep_data else None
         
-        res = extract_resolution(url)
-        
+        # 决定文件名
         if not s or not e:
-            # 找不到季集，保持原名，但仍需插入 tmdbid 目录
+            # 缺失季集，保持原名
             new_filename = parts[-1]
         else:
-            # 正常重构文件名: title.年份.S01E01.1080p.strm
+            # title.年份.S01E01.1080p.strm (title/年份来自tvshow.nfo)
             try:
                 s_e_str = f"S{int(s):02d}E{int(e):02d}"
                 name_elements = []
@@ -163,34 +169,41 @@ def get_reconstructed_path(url):
             except:
                 new_filename = parts[-1]
 
-        tmdb_dir = f"{{tmdb-{tmdbid}}}"
-        new_parts = parts[:root_idx+1] + [tmdb_dir] + parts[root_idx+1:-1] + [new_filename]
-        return "/".join(new_parts)
+        if tmdbid:
+            # 插入 {tmdb-id} 目录
+            new_parts = parts[:root_idx+1] + [f"{{tmdb-{tmdbid}}}"] + parts[root_idx+1:-1] + [new_filename]
+            return "/".join(new_parts)
+        else:
+            # 无ID，标记失败
+            with stats_lock: stats["failed"] += 1
+            return "刮削失败/" + "/".join(parts[:-1] + [new_filename])
 
     else:
         # --- 电影逻辑 ---
-        # 依次查找 同名.nfo 和 movie.nfo
-        movie_data = parse_nfo_data(url.rsplit('.', 1)[0] + ".nfo")
+        # 优先同名 nfo，其次 movie.nfo
+        movie_nfo_url = url.rsplit('.', 1)[0] + ".nfo"
+        movie_data = parse_nfo_data(movie_nfo_url)
         if not movie_data:
             movie_data = parse_nfo_data(url.rsplit('/', 1)[0] + "/movie.nfo")
         
-        # 电影如果没有 NFO 或 NFO 里没有 tmdbid，直接丢弃
-        if not movie_data or not movie_data.get("tmdbid"):
-            return None
-        
-        tmdbid = movie_data["tmdbid"]
-        title = movie_data.get("title")
-        year = movie_data.get("year")
-        res = extract_resolution(url)
-        
-        name_elements = []
-        if title: name_elements.append(title)
-        if year: name_elements.append(year)
-        if res: name_elements.append(res)
-        
-        new_filename = (".".join(name_elements) if name_elements else parts[-1].rsplit('.', 1)[0]) + ".strm"
-        new_parts = parts[:-1] + [f"{{tmdb-{tmdbid}}}"] + [new_filename]
-        return "/".join(new_parts)
+        if movie_data and movie_data.get("tmdbid"):
+            tmdbid = movie_data["tmdbid"]
+            title = movie_data.get("title")
+            year = movie_data.get("year")
+            
+            name_elements = []
+            if title: name_elements.append(title)
+            if year: name_elements.append(year)
+            if res: name_elements.append(res)
+            
+            new_filename = (".".join(name_elements) if name_elements else parts[-1].rsplit('.', 1)[0]) + ".strm"
+            # 插入 {tmdb-id} 目录
+            new_parts = parts[:-1] + [f"{{tmdb-{tmdbid}}}"] + [new_filename]
+            return "/".join(new_parts)
+        else:
+            # 电影无ID
+            with stats_lock: stats["failed"] += 1
+            return "刮削失败/" + rel_path
 
 def process_url(url):
     session = get_session()
@@ -198,20 +211,12 @@ def process_url(url):
         try:
             resp = session.get(url, timeout=10)
             content = resp.text.strip().replace('\n', '').replace('\r', '')
-            
-            # 重构路径
             new_path = get_reconstructed_path(url)
-
-            if new_path:
-                with file_lock:
-                    with open(OUTPUT_FILE, "a", encoding="utf-8") as f:
-                        f.write(f"{new_path}#{content}\n")
-                with stats_lock:
-                    stats["files"] += 1
-            else:
-                # 丢弃逻辑
-                with stats_lock:
-                    stats["discarded"] += 1
+            with file_lock:
+                with open(OUTPUT_FILE, "a", encoding="utf-8") as f:
+                    f.write(f"{new_path}#{content}\n")
+            with stats_lock:
+                stats["files"] += 1
         except: pass
         return
 
@@ -243,7 +248,7 @@ def worker():
 
 def main():
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f: pass
-    print(f"🚀 启动重构爬虫 (强制TMDBID过滤模式), 线程: {THREAD_COUNT}")
+    print(f"🚀 启动重构爬虫 (全格式NFO支持版), 线程: {THREAD_COUNT}")
     start_time = time.time()
     visited_urls.add(BASE_URL)
     task_queue.put(BASE_URL)
@@ -253,7 +258,7 @@ def main():
         while any(t.is_alive() for t in threads):
             time.sleep(1)
             with stats_lock:
-                print(f"进度: 目录 {stats['dirs']} | strm {stats['files']} | 丢弃 {stats['discarded']} | 队列 {task_queue.qsize()}    ", end='\r')
+                print(f"进度: 目录 {stats['dirs']} | strm {stats['files']} | 刮削失败 {stats['failed']} | 队列 {task_queue.qsize()}    ", end='\r')
     except KeyboardInterrupt: pass
     print(f"\n\n✅ 完成！结果存入 {OUTPUT_FILE}")
 
