@@ -8,7 +8,7 @@ import time
 # --- 配置参数 ---
 BASE_URL = "http://emby.xiaoya.pro/"
 OUTPUT_FILE = "strm.txt"
-MAX_WORKERS = 100  # 10线程并发
+MAX_WORKERS = 10  # 10线程并发
 
 # --- 全局变量 ---
 visited_urls = set()
