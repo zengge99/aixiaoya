@@ -1,31 +1,32 @@
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 import threading
 import queue
 from urllib.parse import urljoin, unquote
 import time
+import warnings
+
+# --- 屏蔽烦人的警告 ---
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 # --- 配置 ---
 BASE_URL = "http://emby.xiaoya.pro/"
 OUTPUT_FILE = "strm.txt"
-THREAD_COUNT = 10  # 10线程并发
+THREAD_COUNT = 10  # 可以尝试增加到 20 提升速度
 
 # --- 全局变量 ---
 task_queue = queue.Queue()
 visited_urls = set()
 visited_lock = threading.Lock()
 file_lock = threading.Lock()
-# 统计计数
 stats = {"files": 0, "dirs": 0}
 stats_lock = threading.Lock()
 
-# 每个线程拥有自己的 session 提高效率（Keep-Alive）
 thread_local = threading.local()
 
 def get_session():
     if not hasattr(thread_local, "session"):
         thread_local.session = requests.Session()
-        # 设置通用的 User-Agent
         thread_local.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
         })
@@ -34,15 +35,13 @@ def get_session():
 def process_url(url):
     session = get_session()
     try:
-        # 统一使用 timeout 防止死锁
-        resp = session.get(url, timeout=10)
-        if resp.status_code != 200:
-            return
-
-        # 1. 处理 .strm 文件
+        # 1. 如果是 .strm 文件，我们不需要用 BeautifulSoup 解析，直接获取内容
         if url.lower().endswith('.strm'):
+            resp = session.get(url, timeout=10)
+            # 使用 apparent_encoding 处理可能的乱码
+            resp.encoding = resp.apparent_encoding 
             content = resp.text.strip().replace('\n', '').replace('\r', '')
-            # 路径处理：URL解码 -> 移除域名
+            
             decoded_path = unquote(url)
             prefix = BASE_URL.rstrip('/')
             short_path = decoded_path.replace(prefix, "")
@@ -55,43 +54,41 @@ def process_url(url):
                 stats["files"] += 1
             return
 
-        # 2. 处理目录
+        # 2. 如果是目录，解析网页链接
+        resp = session.get(url, timeout=10)
+        # 强制设置编码为 utf-8，如果还是报错则忽略非法字符
+        html_content = resp.content.decode('utf-8', errors='ignore')
+        
+        # 使用 lxml 解析器，速度极快
+        soup = BeautifulSoup(html_content, 'lxml')
+        
         with stats_lock:
             stats["dirs"] += 1
-            
-        soup = BeautifulSoup(resp.content, 'html.parser')
-        links = soup.find_all('a')
-        
-        for link in links:
+
+        for link in soup.find_all('a'):
             href = link.get('href')
-            # 过滤逻辑
             if not href or href.startswith('?') or href.startswith('/') or href == '../':
                 continue
             
             full_url = urljoin(url, href)
             
-            # 确保只在站内爬取
             if full_url.startswith(BASE_URL):
                 with visited_lock:
                     if full_url not in visited_urls:
                         visited_urls.add(full_url)
                         task_queue.put(full_url)
 
-    except Exception as e:
-        # 打印错误方便调试，实际运行时可注释掉
-        # print(f"Error processing {url}: {e}")
+    except Exception:
         pass
 
 def worker():
-    """线程工作循环"""
     while True:
         try:
-            # 只有当队列为空超过3秒时才退出，确保动态生成的任务有时间入队
-            current_url = task_queue.get(timeout=3)
+            # 缩短 timeout，让程序在任务全部完成后更快退出
+            current_url = task_queue.get(timeout=5)
             process_url(current_url)
             task_queue.task_done()
         except queue.Empty:
-            # 队列空了，代表任务可能已经完成
             break
 
 def main():
@@ -99,38 +96,36 @@ def main():
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         pass
 
-    print(f"🚀 启动爬虫，线程数: {THREAD_COUNT}")
+    print(f"🚀 启动快速爬虫 (LXML+Session)，线程数: {THREAD_COUNT}")
     start_time = time.time()
 
-    # 放入初始任务
     visited_urls.add(BASE_URL)
     task_queue.put(BASE_URL)
 
-    # 创建并启动线程
     threads = []
     for i in range(THREAD_COUNT):
         t = threading.Thread(target=worker)
+        t.daemon = True # 设置为守护线程，方便主程序强制退出
         t.start()
         threads.append(t)
 
     # 监控进度
-    while any(t.is_alive() for t in threads):
-        time.sleep(2)
-        with stats_lock:
-            print(f"进度监控: 已扫描目录 {stats['dirs']}, 已提取 strm 文件 {stats['files']} ...", end='\r')
-
-    # 等待所有线程结束
-    for t in threads:
-        t.join()
+    try:
+        while any(t.is_alive() for t in threads):
+            time.sleep(1)
+            with stats_lock:
+                # 实时刷新进度
+                print(f"进度: 文件夹 {stats['dirs']} | 找到 strm {stats['files']} | 剩余队列 {task_queue.qsize()}    ", end='\r')
+        
+        for t in threads:
+            t.join()
+    except KeyboardInterrupt:
+        print("\n🛑 用户强制停止")
 
     end_time = time.time()
     print(f"\n\n✅ 爬取完成！")
     print(f"总耗时: {end_time - start_time:.2f} 秒")
-    print(f"总计提取: {stats['files']} 个 strm 文件")
     print(f"结果文件: {OUTPUT_FILE}")
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\n用户手动停止。")
+    main()
