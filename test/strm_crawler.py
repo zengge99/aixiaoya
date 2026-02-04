@@ -14,7 +14,7 @@ warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 # --- 配置 ---
 BASE_URL = "http://emby.xiaoya.pro/"
 OUTPUT_FILE = "strm.txt"
-THREAD_COUNT = 100 
+THREAD_COUNT = 200 
 
 # --- 全局变量 ---
 task_queue = queue.Queue()
