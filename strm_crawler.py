@@ -38,10 +38,6 @@ def get_session():
     return thread_local.session
 
 def get_xml_tag_text(root, tag):
-    """
-    精确提取逻辑：
-    1. root.find(tag) 只会查找当前节点下的直接子节点，不会进入 <actor> 内部。
-    """
     # 优先提取直接子节点的标签 (如 <movie><tmdbid>509730</tmdbid>)
     node = root.find(tag)
     if node is not None and node.text and node.text.strip():
@@ -215,7 +211,7 @@ def worker():
 
 def main():
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f: pass
-    print(f"🚀 启动重构爬虫 (精准 ID 匹配版), 线程: {THREAD_COUNT}")
+    print(f"🚀 启动重构爬虫, 线程: {THREAD_COUNT}")
     start_time = time.time()
     visited_urls.add(BASE_URL)
     task_queue.put(BASE_URL)
@@ -225,7 +221,7 @@ def main():
         while any(t.is_alive() for t in threads):
             time.sleep(1)
             with stats_lock:
-                print(f"进度: 目录 {stats['dirs']} | strm {stats['files']} | 刮削失败 {stats['failed']} | 队列 {task_queue.qsize()}    ", end='\r')
+                print(f"进度: 目录 {stats['dirs']} | strm {stats['files']} | 刮削失败 {stats['failed']} | 待处理队列 {task_queue.qsize()}    ", end='\r')
     except KeyboardInterrupt: pass
     print(f"\n\n✅ 完成！")
 
