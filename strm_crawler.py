@@ -140,7 +140,7 @@ def get_reconstructed_path(url):
             except:
                 new_filename = parts[-1]
 
-        if tmdbid:
+        if tmdbid and s and e:
             new_parts = parts[:root_idx+1] + [f"{{tmdb-{tmdbid}}}"] + parts[root_idx+1:-1] + [new_filename]
             return "/".join(new_parts)
         else:
@@ -226,4 +226,5 @@ def main():
     print(f"\n\n✅ 完成！")
 
 if __name__ == "__main__":
+
     main()
