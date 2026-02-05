@@ -520,7 +520,7 @@ config_block_p() {
     }
 
     # 在目标块中检查现有的location
-    in_target_block && /location ^~ \/p\/ \{/ {
+    in_target_block && /location \^\~ \/p\/ \{/ {
         # 跳过现有的if块（不打印）
         while (getline > 0) {
             if (/}[[:space:]]*$/) {
@@ -586,7 +586,7 @@ config_strm() {
     }
 
     # 在目标块中检查现有的location
-    in_target_block && /location ^~ \/dav\/strm \{/ {
+    in_target_block && /location \^\~ \/dav\/strm \{/ {
         # 跳过现有的if块（不打印）
         while (getline > 0) {
             if (/}[[:space:]]*$/) {
