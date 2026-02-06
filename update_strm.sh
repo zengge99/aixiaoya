@@ -27,7 +27,7 @@ while true; do
     echo "[$(date)] 开始更新任务..."
 
     # 2. 运行 Python 爬虫
-    if python3 strm_crawler.py; then
+    if python3 "$(dirname "$0")/strm_crawler.py"; then
         
         # 3. 处理本地 ZIP 文件并追加进 strm.txt
         if [ -f "$LOCAL_ZIP" ]; then
