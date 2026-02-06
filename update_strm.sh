@@ -13,7 +13,7 @@ echo "正在检查并清理旧进程..."
 pgrep -f "$(basename "$0")" | grep -v $$ | xargs kill 2>/dev/null 2>&1
 
 # 确保在脚本所在目录运行
-cd "$(dirname "$0")"
+# cd "$(dirname "$0")"
 
 # 检查依赖工具
 for cmd in python3 unzip zip git; do
