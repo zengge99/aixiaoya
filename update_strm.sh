@@ -51,7 +51,7 @@ while true; do
             echo "已生成压缩包: $ZIP_FILE"
 
             # 6. Git 提交与推送
-            git add "$ZIP_FILE" "$STRM_FILE" # 建议两个都 add，确保同步
+            git add "$ZIP_FILE"
             
             if ! git diff --cached --quiet; then
                 git commit -m "自动更新strm，时间：$(date +'%Y-%m-%d %H:%M:%S')"
