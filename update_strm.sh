@@ -47,7 +47,7 @@ while true; do
             echo "所有条目已完成处理。当前总行数: $(wc -l < "$STRM_FILE")"
 
             # 5. 压缩成 ZIP 供发布
-            zip -qj "$ZIP_FILE"
+            zip -qj "$ZIP_FILE" "$STRM_FILE"
             echo "已生成压缩包: $ZIP_FILE"
 
             # 6. Git 提交与推送
