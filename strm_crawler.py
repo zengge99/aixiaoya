@@ -111,9 +111,9 @@ def find_tv_root_context(strm_url):
 
 def get_reconstructed_path(url):
     decoded_url = unquote(url)
-    rel_path = decoded_url.replace(BASE_URL.rstrip('/'), "").strip('/').replace('#', "")
+    rel_path = decoded_url.replace(BASE_URL.rstrip('/'), "").strip('/')
     parts = rel_path.split('/')
-    if not parts: return rel_path
+    if not parts: return rel_path.replace('#', "")
 
     res = extract_resolution(url)
     root_idx, tv_info = find_tv_root_context(url)
@@ -142,10 +142,10 @@ def get_reconstructed_path(url):
 
         if tmdbid and s and e:
             new_parts = parts[:root_idx+1] + [f"{{tmdb-{tmdbid}}}"] + parts[root_idx+1:-1] + [new_filename]
-            return "/".join(new_parts)
+            return "/".join(new_parts).replace('#', "")
         else:
             with stats_lock: stats["failed"] += 1
-            return "刮削失败/" + "/".join(parts[:-1] + [new_filename])
+            return "刮削失败/" + "/".join(parts[:-1] + [new_filename]).replace('#', "")
     else:
         # Movie 逻辑
         movie_nfo_url = url.rsplit('.', 1)[0] + ".nfo"
@@ -163,10 +163,10 @@ def get_reconstructed_path(url):
             if res: name_parts.append(res)
             new_filename = (".".join(name_parts) if name_parts else parts[-1].rsplit('.', 1)[0]) + ".strm"
             new_parts = parts[:-1] + [f"{{tmdb-{tmdbid}}}"] + [new_filename]
-            return "/".join(new_parts)
+            return "/".join(new_parts).replace('#', "")
         else:
             with stats_lock: stats["failed"] += 1
-            return "刮削失败/" + rel_path
+            return "刮削失败/" + rel_path.replace('#', "")
 
 def process_url(url):
     session = get_session()
