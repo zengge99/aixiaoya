@@ -111,7 +111,7 @@ def find_tv_root_context(strm_url):
 
 def get_reconstructed_path(url):
     decoded_url = unquote(url)
-    rel_path = decoded_url.replace(BASE_URL.rstrip('/'), "").strip('/')
+    rel_path = decoded_url.replace(BASE_URL.rstrip('/'), "").strip('/').replace('#', "")
     parts = rel_path.split('/')
     if not parts: return rel_path
 
@@ -228,3 +228,4 @@ def main():
 if __name__ == "__main__":
 
     main()
+
