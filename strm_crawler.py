@@ -109,6 +109,17 @@ def find_tv_root_context(strm_url):
                 dir_nfo_cache[search_url] = {"has_tvshow": False}
     return None, None
 
+def extract_season_episode(filename):
+    pattern = r'[Ss](\d+)[Ee](\d+)'
+    match = re.search(pattern, filename)
+    
+    if match:
+        s = int(match.group(1))
+        e = int(match.group(2))
+        return s, e
+    else:
+        return None, None
+
 def get_reconstructed_path(url):
     decoded_url = unquote(url)
     rel_path = decoded_url.replace(BASE_URL.rstrip('/'), "").strip('/')
@@ -125,6 +136,9 @@ def get_reconstructed_path(url):
         ep_data = parse_nfo_data(ep_nfo_url)
         s = ep_data.get("season") if ep_data else None
         e = ep_data.get("episode") if ep_data else None
+
+        if not s or not e:
+            s, e = extract_season_episode(parts[-1])
         
         if not s or not e:
             new_filename = parts[-1]
