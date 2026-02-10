@@ -3,17 +3,25 @@
 # ================= 配置区 =================
 STRM_FILE="strm.txt"
 ZIP_FILE="strm.zip"
-LOCAL_ZIP="local_strm_list.zip"  # 现在指向 zip 文件
+LOCAL_ZIP="local_strm_list.zip"
 SIGN="?sign=SIGN_STR"
 SLEEP_TIME=21600 # 6小时
 # ==========================================
 
+# --- 新增：处理 Ctrl+C 的函数 ---
+cleanup() {
+    echo -e "\n[!] 检测到中断信号 (Ctrl+C)。正在安全退出..."
+    # 如果这里有需要清理的临时文件，可以在此处添加 rm 命令
+    exit 0
+}
+
+# 注册信号捕捉：当接收到 SIGINT (Ctrl+C) 或 SIGTERM 时调用 cleanup
+trap cleanup SIGINT SIGTERM
+# ------------------------------
+
 # 1. 杀掉旧的实例，排除当前进程 PID ($$)
 echo "正在检查并清理旧进程..."
 pgrep -f "$(basename "$0")" | grep -v $$ | xargs kill 2>/dev/null 2>&1
-
-# 确保在脚本所在目录运行
-# cd "$(dirname "$0")"
 
 # 检查依赖工具
 for cmd in python3 unzip zip git; do
@@ -31,17 +39,13 @@ while true; do
         
         # 3. 处理本地 ZIP 文件并追加进 strm.txt
         if [ -f "$LOCAL_ZIP" ]; then
-            # unzip -p 代表将解压后的内容直接输出到 stdout
-            # 这样不需要产生临时文件，直接追加到 strm.txt
             unzip -p "$LOCAL_ZIP" >> "$STRM_FILE"
             echo "已从 $LOCAL_ZIP 提取并合并数据。"
         fi
 
         # 4. 处理签名和去重
         if [ -f "$STRM_FILE" ]; then
-            # 给没有签名的行加签名 (幂等处理)
             sed -i "/?sign=/! s|$|$SIGN|" "$STRM_FILE"
-            # 排序并去重
             sort -u "$STRM_FILE" -o "$STRM_FILE"
             
             echo "所有条目已完成处理。当前总行数: $(wc -l < "$STRM_FILE")"
@@ -58,17 +62,18 @@ while true; do
                 if git push; then
                     echo "Git 推送成功。"
                 else
-                    echo "警告：Git 推送失败，可能是网络问题，将在下次循环重试。"
+                    echo "警告：Git 推送失败，将在下次循环重试。"
                 fi
             else
                 echo "文件内容无变化，跳过提交。"
             fi
         fi
-
     else
         echo "警告：爬虫运行失败，跳过本次更新。"
     fi
 
-    echo "[$(date)] 进入休眠，等待下一次循环..."
-    sleep "$SLEEP_TIME"
+    echo "[$(date)] 进入休眠，等待下一次循环 ($((SLEEP_TIME/3600)) 小时)..."
+    
+    # 技巧：sleep 期间按下 Ctrl+C 会立即触发 trap
+    sleep "$SLEEP_TIME" & wait $!
 done
