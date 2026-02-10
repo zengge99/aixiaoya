@@ -28,11 +28,12 @@ MAX_LEN = 128
 
 # === 模型选择 (用户指定) ===
 # 华为官方 TinyBERT (通用版 4层)
-BERT_HF_NAME = 'huawei-noah/TinyBERT_General_4L_312D'
-BERT_LOCAL_FOLDER = "bert_base_huawei_general"
+# BERT_HF_NAME = 'huawei-noah/TinyBERT_General_4L_312D'
+BERT_HF_NAME = 'bert-base-chinese'
+BERT_LOCAL_FOLDER = "save_path"
 
 # 权重文件
-MODEL_WEIGHTS_PATH = "movie_model_bio.pth"
+MODEL_WEIGHTS_PATH = "movie_model.pth"
 DATA_FILE_PATTERN = "train_data*.txt"
 
 SEED = 42
