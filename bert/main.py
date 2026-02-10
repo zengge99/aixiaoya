@@ -29,7 +29,7 @@ MAX_LEN = 128
 # === 模型选择 (用户指定) ===
 # 华为官方 TinyBERT (通用版 4层)
 # BERT_HF_NAME = 'huawei-noah/TinyBERT_General_4L_312D'
-BERT_HF_NAME = 'bert-tiny-chinese'
+BERT_HF_NAME = 'bert-base-chinese'
 BERT_LOCAL_FOLDER = "save_path"
 
 # 权重文件
