@@ -59,8 +59,8 @@ class TextUtils:
         puncts = r'\[\]\(\)\{\}\-\'\"\:!&' 
         cn_puncts = r'【】（）《》：'
         # 3. 替换非法字符
-        pattern = f'[^{chars}{puncts}{cn_puncts}\\s]'
-        text = re.sub(pattern, ' ', text)
+        # pattern = f'[^{chars}{puncts}{cn_puncts}\\s]'
+        # text = re.sub(pattern, ' ', text)
         return text
 
     @staticmethod
