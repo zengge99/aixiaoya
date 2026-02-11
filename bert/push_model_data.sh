@@ -3,51 +3,45 @@
 # 1. 配置变量
 FILE1="movie_ner_bert.onnx"
 FILE2="movie_ner_bert.onnx.data"
-TEMP_ZIP="movie_ner_bert_model.zip"
+DIR1="save_path"
+TEMP_ZIP="movie_model_full.zip"
 CHUNK_SIZE="49M"
-PREFIX="movie_ner_bert_model.zip.part"
+PREFIX="movie_model_full.zip.part"
 
-# 2. 检查文件是否存在
-if [ ! -f "$FILE1" ] || [ ! -f "$FILE2" ]; then
-    echo "错误: 找不到 $FILE1 或 $FILE2"
-    exit 1
-fi
-
-# 检查是否安装了 zip
-if ! command -v zip &> /dev/null; then
-    echo "错误: 未安装 zip，请先安装 (例如: sudo apt install zip)"
-    exit 1
-fi
-
-echo "正在将文件压缩为 $TEMP_ZIP..."
+# 2. 检查文件和目录是否存在
+echo "检查文件和文件夹..."
+if [ ! -f "$FILE1" ]; then echo "错误: 找不到 $FILE1"; exit 1; fi
+if [ ! -f "$FILE2" ]; then echo "错误: 找不到 $FILE2"; exit 1; fi
+if [ ! -d "$DIR1" ]; then echo "错误: 找不到目录 $DIR1"; exit 1; fi
 
 # 3. 创建 ZIP 压缩包
+# -r: 递归压缩文件夹
 # -q: 静默模式
-# -j: 仅存储文件，不存储目录路径（可选）
-zip -q "$TEMP_ZIP" "$FILE1" "$FILE2"
-
-echo "正在拆分压缩包..."
+echo "正在打包压缩 $FILE1, $FILE2 和 $DIR1 ..."
+zip -rq "$TEMP_ZIP" "$FILE1" "$FILE2" "$DIR1"
 
 # 4. 拆分压缩包
+echo "正在拆分压缩包为 ${CHUNK_SIZE} 的分卷..."
 split -b $CHUNK_SIZE -d "$TEMP_ZIP" "$PREFIX"
 
-# 5. 立即删除临时的庞大 ZIP 文件（避免占用本地空间和误传）
+# 5. 清理临时的巨大压缩包
 rm "$TEMP_ZIP"
 
-echo "拆分完成，生成的文件如下："
+echo "拆分完成，分卷如下："
 ls -lh ${PREFIX}*
 
-# 6. 更新 .gitignore
-for f in "$FILE1" "$FILE2" "$TEMP_ZIP"; do
-    if ! grep -q "$f" .gitignore 2>/dev/null; then
-        echo "$f" >> .gitignore
+# 6. 自动更新 .gitignore
+echo "更新 .gitignore..."
+for item in "$FILE1" "$FILE2" "$DIR1" "$TEMP_ZIP"; do
+    if ! grep -q "^$item$" .gitignore 2>/dev/null; then
+        echo "$item" >> .gitignore
     fi
 done
 
-# 7. Git 操作
+# 7. Git 推送
 echo "正在推送到 GitHub..."
 git add "${PREFIX}*" .gitignore
-git commit -m "Add split zip parts of movie_ner_bert model"
+git commit -m "Add split zip parts of model and save_path directory"
 git push
 
-echo "全部完成！"
+echo "全部任务已完成！"
