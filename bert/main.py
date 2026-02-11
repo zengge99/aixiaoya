@@ -74,7 +74,7 @@ class TextUtils:
         if not text: 
             return ""
         text = text.strip(" .-_[]()/\\")
-        text = re.sub(r'[.-_\[\]()]', ' ', text)
+        text = re.sub(r'[.-_\[\]()/]', ' ', text)
         text = re.sub(r'\s+', ' ', text)
         return text
 
