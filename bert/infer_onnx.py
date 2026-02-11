@@ -257,14 +257,14 @@ def do_inference(raw_path, ort_session, tokenizer):
     # --- 5. 结果筛选 (逻辑同原版) ---
     has_dbg = os.path.exists("dbg")
     if has_dbg:
-    print(f"\nPATH: {raw_path}")
-    print("-" * 40)
-    # 顺便打印下逐个 token 的情况
-    for i, pred_class in enumerate(preds):
-        s, e = offset_mapping[i]
-        if s == e: continue
-        lbl = "O" if pred_class == 0 else ("B" if pred_class == 1 else "I")
-        print(f"{raw_path[s:e]:<10} | {lbl} | {probs_seq[i][pred_class]:.4f}")
+        print(f"\nPATH: {raw_path}")
+        print("-" * 40)
+        # 顺便打印下逐个 token 的情况
+        for i, pred_class in enumerate(preds):
+            s, e = offset_mapping[i]
+            if s == e: continue
+            lbl = "O" if pred_class == 0 else ("B" if pred_class == 1 else "I")
+            print(f"{raw_path[s:e]:<10} | {lbl} | {probs_seq[i][pred_class]:.4f}")
     print("-" * 40)
 
     final_res = ""
