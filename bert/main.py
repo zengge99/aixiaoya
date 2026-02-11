@@ -64,9 +64,17 @@ class TextUtils:
         return text
 
     @staticmethod
-    def cleanup_result(text):
+    def cleanup_result_(text):
         if not text: return ""
         text = text.strip(" .-_[]()/\\")
+        text = re.sub(r'\s+', ' ', text)
+        return text
+
+    def cleanup_result(text):
+        if not text: 
+            return ""
+        text = text.strip(" .-_[]()/\\")
+        text = re.sub(r'[.-_\[\]()]', ' ', text)
         text = re.sub(r'\s+', ' ', text)
         return text
 
