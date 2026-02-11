@@ -18,6 +18,15 @@ class TextUtils:
     CN_NUMS = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]
 
     @staticmethod
+    def cleanup_result(text):
+        if not text: 
+            return ""
+        text = text.strip(" .-_[]()/\\")
+        text = re.sub(r'[.\-_\[\]()/]', ' ', text)
+        # text = re.sub(r'\s+', ' ', text)
+        return text
+
+    @staticmethod
     def cn_to_arabic(cn_str):
         """将中文数字（一到九十九）转换为字符串格式的阿拉伯数字"""
         cn_num_map = {'零':0, '一':1, '二':2, '三':3, '四':4, '五':5, '六':6, '七':7, '八':8, '九':9}
