@@ -168,13 +168,8 @@ def init_onnx_session():
     actual_onnx_path = get_resource_path(ONNX_MODEL_PATH)
 
     tokenizer = BertTokenizer.from_pretrained("save_path")
-    sess = ort.InferenceSession(onnx_file, providers=['CPUExecutionProvider'])
+    sess = ort.InferenceSession(actual_onnx_path, providers=['CPUExecutionProvider'])
     
-    sess = ort.InferenceSession(
-        actual_onnx_path,
-        providers=["CPUExecutionProvider"],
-        sess_options=ort.SessionOptions()
-    )
     return sess, tokenizer
 
 def do_inference(raw_path, ort_session, tokenizer):
