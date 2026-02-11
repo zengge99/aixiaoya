@@ -53,7 +53,7 @@ class TextUtils:
     def preprocess_for_bert(text):
         if not text: return ""
         # 1. 分隔符处理
-        text = re.sub(r'[._]', ' ', text)
+        # text = re.sub(r'[._]', ' ', text)
         # 2. 白名单保留
         chars = r'a-zA-Z0-9\u4e00-\u9fa5'
         puncts = r'\[\]\(\)\{\}\-\'\"\:!&' 
