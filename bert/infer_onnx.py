@@ -177,7 +177,7 @@ def do_inference(raw_path, ort_session, tokenizer):
     raw_path = raw_path.strip()
 
     # --- 1. 前处理与 Tokenization ---
-    text_for_bert = TextUtils.preprocess_for_bert(raw_path)
+    text_for_bert = raw_path
     inputs = tokenizer(
         text_for_bert,
         return_offsets_mapping=True,
