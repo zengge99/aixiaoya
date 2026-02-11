@@ -5,6 +5,7 @@ import re
 import sys
 import os
 import argparse
+import numpy as np
 from flask import Flask, request, jsonify
 
 # --- 全局配置 ---
