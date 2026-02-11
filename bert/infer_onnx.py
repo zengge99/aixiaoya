@@ -1,4 +1,5 @@
 import onnxruntime as ort
+from transformers import BertTokenizer
 import pickle
 import re
 import sys
@@ -7,10 +8,8 @@ import argparse
 from flask import Flask, request, jsonify
 
 # --- 全局配置 ---
-MAX_LEN = 300
-THRESHOLD = 0.35
-VOCAB_PATH = "vocab.pkl"
-ONNX_MODEL_PATH = "movie_extractor.onnx"
+MAX_LEN = 128
+ONNX_MODEL_PATH = "movie_ner_bert.onnx"
 DEBUG_MODE = os.path.exists("dbg")
 
 # --- 必需工具类 TextUtils ---
@@ -167,82 +166,110 @@ def get_resource_path(relative_path):
 # --- ONNX 初始化 ---
 def init_onnx_session():
     actual_onnx_path = get_resource_path(ONNX_MODEL_PATH)
-    actual_vocab_path = get_resource_path(VOCAB_PATH)
 
-    if not os.path.exists(actual_onnx_path) or not os.path.exists(actual_vocab_path):
-        print(f"❌ 缺失文件：需 {ONNX_MODEL_PATH} 和 {VOCAB_PATH} 在同目录")
-        return None, None
-    
-    with open(actual_vocab_path, 'rb') as f:
-        char_to_idx = pickle.load(f)
+    tokenizer = BertTokenizer.from_pretrained("save_path")
+    sess = ort.InferenceSession(onnx_file, providers=['CPUExecutionProvider'])
     
     sess = ort.InferenceSession(
         actual_onnx_path,
         providers=["CPUExecutionProvider"],
         sess_options=ort.SessionOptions()
     )
-    return sess, char_to_idx
+    return sess, tokenizer
 
-# --- 核心推理逻辑提取 ---
-def do_inference(path, sess, char_to_idx):
-    if '#' in path:
-        return "" # 原逻辑中碰到#号直接返回空或打印原路径
+def do_inference(raw_path, ort_session, tokenizer):
+    if not raw_path.strip() or raw_path.startswith('#'): return
+    raw_path = raw_path.strip()
+
+    # --- 1. 前处理与 Tokenization ---
+    text_for_bert = TextUtils.preprocess_for_bert(raw_path)
+    inputs = tokenizer(
+        text_for_bert,
+        return_offsets_mapping=True,
+        truncation=True,
+        max_length=MAX_LEN,
+        padding=False # ONNX 支持动态长度时建议不强制填充到 128 以提升速度
+    )
     
-    input_ids = [char_to_idx.get(c.lower(), 1) for c in path[:MAX_LEN]]
-    padded = input_ids + [0] * (MAX_LEN - len(input_ids))
-    padded = [padded]
+    # 转换为 NumPy 格式并增加 Batch 维度 [1, seq_len]
+    input_ids = np.array(inputs['input_ids'], dtype=np.int64)[None, :]
+    attention_mask = np.array(inputs['attention_mask'], dtype=np.int64)[None, :]
 
-    outputs = sess.run(["probs"], {"input_ids": padded})
-    probs = outputs[0][0][:len(path)]
-    if DEBUG_MODE:
-        print(f"\n{'='*65}")
-        print(f"{'索引':<4} | {'字符':<4} | {'分值':<15} | 状态")
-        print("-" * 65)
-        for i, p in enumerate(probs):
-            status = "✅ [选中]" if p > THRESHOLD else "   [排除]"
-            print(f"{i:<4} | {path[i]:<4} | {p:.10f} | {status}")
-        print(f"{'='*65}\n")
-    selected_mask = [False] * len(probs)
-    for i, p in enumerate(probs):
-        if p > THRESHOLD:
-            selected_mask[i] = True
+    # --- 2. ONNX 执行推理 ---
+    # ort_session.run(输出节点名列表, 输入字典)
+    # 输入字典的 key 必须与导出时的 input_names ["input_ids", "attention_mask"] 一致
+    ort_inputs = {
+        "input_ids": input_ids,
+        "attention_mask": attention_mask
+    }
+    logits = ort_session.run(None, ort_inputs)[0] # 输出形状 [1, seq_len, 3]
+    
+    # --- 3. 后处理 (Logits -> Probs -> Preds) ---
+    probs_seq = softmax_np(logits[0]) # 取第一个 batch 并转为概率 [seq_len, 3]
+    preds = np.argmax(probs_seq, axis=1) # [seq_len]
+    
+    offset_mapping = inputs['offset_mapping']
+    
+    # --- 4. BIO 标签解析 (逻辑同原版) ---
+    candidate_entities = []
+    current_entity = []
+    
+    for i, pred_class in enumerate(preds):
+        start, end = offset_mapping[i]
+        if start == end: continue # 跳过 [CLS], [SEP] 或填充部分
+        
+        conf = probs_seq[i][pred_class]
+        
+        if pred_class == 1:  # B-Movie
+            if current_entity:
+                candidate_entities.append(current_entity)
+            current_entity = [{'start': start, 'end': end, 'conf': conf, 'token': raw_path[start:end]}]
             
-    gap_limit = 2 
-    for i in range(len(probs)):
-        if selected_mask[i]:
-            for j in range(i + 1, min(i + gap_limit + 2, len(probs))):
-                if selected_mask[j]:
-                    for k in range(i + 1, j):
-                        if path[k] not in ['/', '\\']:
-                            selected_mask[k] = True
-                    break
-
-    res_list = [path[i] for i, is_sel in enumerate(selected_mask) if is_sel]
-    raw_result = "".join(res_list)
-    clean_result = raw_result.replace('.', ' ').replace('_', ' ')
-    clean_result = re.sub(r'\s+', ' ', clean_result)
-    clean_result = clean_result.strip("/()# “”.-")
-
-    if clean_result:
-        escaped_clean = re.escape(clean_result)
-        verify_pattern = escaped_clean.replace(r'\ ', r'[._\s\-\(\)\[\]]*')
-        if not re.search(verify_pattern, path, re.IGNORECASE):
-            clean_result = ""
-
-    if clean_result:
-        clean_result = TextUtils.fix_name(path, clean_result)
+        elif pred_class == 2:  # I-Movie
+            if current_entity:
+                current_entity.append({'start': start, 'end': end, 'conf': conf, 'token': raw_path[start:end]})
+            else:
+                # 容错处理：若只有 I 出现，视作起始
+                current_entity = [{'start': start, 'end': end, 'conf': conf, 'token': raw_path[start:end]}]
+        
+        else:  # O (Outside)
+            if current_entity:
+                candidate_entities.append(current_entity)
+                current_entity = []
     
-    return clean_result
+    if current_entity:
+        candidate_entities.append(current_entity)
+
+    # --- 5. 结果筛选 (逻辑同原版) ---
+    has_dbg = os.path.exists("dbg")
+    final_res = ""
+    best_score = -1.0
+    
+    for cand in candidate_entities:
+        c_start = cand[0]['start']
+        c_end = cand[-1]['end']
+        raw_extract = raw_path[c_start:c_end]
+        cleaned_text = TextUtils.cleanup_result(raw_extract)
+        
+        avg_conf = np.mean([item['conf'] for item in cand])
+        
+        if cleaned_text and avg_conf > best_score:
+            best_score = avg_conf
+            final_res = cleaned_text
+
+    if final_res:
+        final_res = TextUtils.fix_name(raw_path, final_res)
+    return final_res
 
 # --- 预测动作封装 ---
-def predict_single_path(path, sess, char_to_idx):
-    res = do_inference(path, sess, char_to_idx)
+def predict_single_path(path, sess, tokenizer):
+    res = do_inference(path, sess, tokenizer)
     if res:
         print(f"{path}#{res}")
     else:
         print(f"{path}")
 
-def run_batch_predict(file_path, sess, char_to_idx):
+def run_batch_predict(file_path, sess, tokenizer):
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             lines = [line.strip() for line in f.readlines() if line.strip()]
@@ -251,7 +278,7 @@ def run_batch_predict(file_path, sess, char_to_idx):
         return
     
     for line in lines:
-        predict_single_path(line, sess, char_to_idx)
+        predict_single_path(line, sess, tokenizer)
 
 # --- HTTP 服务模式 ---
 def start_server(port):
@@ -262,8 +289,8 @@ def start_server(port):
         q = request.args.get('q', '')
         if not q:
             return jsonify({"error": "missing parameter q"}), 400
-        sess, char_to_idx = init_onnx_session()
-        result = do_inference(q, sess, char_to_idx)
+        sess, tokenizer = init_onnx_session()
+        result = do_inference(q, sess, tokenizer)
         print(f"{result}")
         return result  # 直接返回提取出的字符串
 
@@ -280,7 +307,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # 初始化模型
-    sess, char_to_idx = init_onnx_session()
+    sess, tokenizer = init_onnx_session()
     if not sess:
         sys.exit(1)
 
@@ -291,8 +318,8 @@ if __name__ == "__main__":
     # 其次判断是否有输入路径进行单条或批量预测
     elif args.input:
         if os.path.exists(args.input) and os.path.isfile(args.input):
-            run_batch_predict(args.input, sess, char_to_idx)
+            run_batch_predict(args.input, sess, tokenizer)
         else:
-            predict_single_path(args.input, sess, char_to_idx)
+            predict_single_path(args.input, sess, tokenizer)
     else:
         parser.print_help()
