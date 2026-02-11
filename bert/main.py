@@ -286,63 +286,87 @@ def predict_single(raw_path, model, tokenizer):
     )
     
     with torch.no_grad():
-        # logits: [1, seq_len, 3]
         logits = model(inputs['input_ids'], inputs['attention_mask'])
-        # 取最大概率的索引: [1, seq_len] -> [seq_len]
-        preds = torch.argmax(logits, dim=2)[0].numpy()
+        # 1. 计算所有类别的概率 [seq_len, 3]
+        probs = F.softmax(logits, dim=2)[0] 
+        # 2. 获取预测索引 [seq_len]
+        preds = torch.argmax(probs, dim=1).cpu().numpy()
+        probs = probs.cpu().numpy()
         
     offset_mapping = inputs['offset_mapping'][0].numpy()
     
-    # 还原回字符级 Mask
-    char_mask = np.zeros(len(raw_path), dtype=bool)
-    
-    # Debug 信息
+    # --- Debug 收集部分 ---
     debug_info = []
+    has_dbg = os.path.exists("dbg")
 
+    # 提取候选实体
+    candidate_entities = []
+    current_entity = []
+    
     for i, pred_class in enumerate(preds):
         start, end = offset_mapping[i]
-        if start == end: continue
-        if end > len(raw_path): continue
+        if start == end: continue # 跳过 [CLS] [SEP]
         
-        # 只要是 B(1) 或 I(2)，都认为是实体的一部分
-        if pred_class in [1, 2]:
-            char_mask[start:end] = True
-            
-        if os.path.exists("dbg"):
-            token_str = raw_path[start:end]
-            label_str = "O" if pred_class == 0 else ("B" if pred_class == 1 else "I")
-            debug_info.append(f"{token_str:<5} | {label_str}")
+        token_str = raw_path[start:end]
+        label_str = "O" if pred_class == 0 else ("B" if pred_class == 1 else "I")
+        # 获取当前预测类别的具体概率
+        conf = probs[i][pred_class]
+        
+        # 将调试信息存入列表：Token | 标签 | 置信度
+        if has_dbg:
+            debug_info.append(f"{token_str:<8} | {label_str} | {conf:.4f}")
 
-    # Debug 打印
-    if os.path.exists("dbg"):
+        if pred_class in [1, 2]:
+            current_entity.append({'start': start, 'end': end, 'conf': conf})
+        else:
+            if current_entity:
+                candidate_entities.append(current_entity)
+                current_entity = []
+    
+    if current_entity:
+        candidate_entities.append(current_entity)
+
+    # --- Debug 打印部分 ---
+    if has_dbg:
         print(f"\nPATH: {raw_path}")
-        print("Tokens:", " ".join(debug_info))
-    
-    # 后处理：提取连续区域
-    final_res = ""
-    true_indices = np.where(char_mask)[0]
-    
-    if len(true_indices) > 0:
-        groups = []
-        curr_grp = [true_indices[0]]
-        for i in range(1, len(true_indices)):
-            prev, curr = true_indices[i-1], true_indices[i]
-            
-            # 如果断开，但距离很近且只是标点，则连起来 (Gap Filling)
-            gap_str = raw_path[prev+1:curr]
-            if (curr - prev) < 5 and not any(c.isalnum() for c in gap_str):
-                curr_grp.append(curr)
+        print(f"{'Token':<8} | Lbl | Conf")
+        print("-" * 25)
+        for info in debug_info:
+            print(info)
+
+    # --- 后处理合并逻辑 (Gap Filling) ---
+    merged_candidates = []
+    if candidate_entities:
+        curr_merged = candidate_entities[0]
+        for next_ent in candidate_entities[1:]:
+            prev_end = curr_merged[-1]['end']
+            next_start = next_ent[0]['start']
+            gap_str = raw_path[prev_end:next_start]
+            if (next_start - prev_end) < 5 and not any(c.isalnum() for c in gap_str):
+                curr_merged.extend(next_ent)
             else:
-                groups.append(curr_grp)
-                curr_grp = [curr]
-        groups.append(curr_grp)
+                merged_candidates.append(curr_merged)
+                curr_merged = next_ent
+        merged_candidates.append(curr_merged)
+
+    # --- 择优：取平均概率最大的实体 ---
+    final_res = ""
+    best_score = -1.0
+    
+    for cand in merged_candidates:
+        avg_conf = np.mean([item['conf'] for item in cand])
         
-        # 提取最长的一组
-        best_grp = max(groups, key=len)
-        raw_extract = raw_path[best_grp[0]:best_grp[-1] + 1]
-        final_res = TextUtils.cleanup_result(raw_extract)
+        char_start = cand[0]['start']
+        char_end = cand[-1]['end']
+        raw_extract = raw_path[char_start:char_end]
+        cleaned_text = TextUtils.cleanup_result(raw_extract)
+        
+        if cleaned_text and avg_conf > best_score:
+            best_score = avg_conf
+            final_res = cleaned_text
 
     if final_res:
+        if has_dbg: print(f"Selected: {final_res} (Score: {best_score:.4f})")
         print(f"{raw_path}#{final_res}")
     else:
         print(f"{raw_path}#")
