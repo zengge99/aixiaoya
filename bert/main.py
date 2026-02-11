@@ -287,38 +287,35 @@ def predict_single(raw_path, model, tokenizer):
     
     with torch.no_grad():
         logits = model(inputs['input_ids'], inputs['attention_mask'])
-        # 1. 计算所有类别的概率 [seq_len, 3]
         probs = F.softmax(logits, dim=2)[0] 
-        # 2. 获取预测索引 [seq_len]
         preds = torch.argmax(probs, dim=1).cpu().numpy()
         probs = probs.cpu().numpy()
         
     offset_mapping = inputs['offset_mapping'][0].numpy()
     
-    # --- Debug 收集部分 ---
-    debug_info = []
-    has_dbg = os.path.exists("dbg")
-
-    # 提取候选实体
+    # --- 1. 严格切分实体片段 ---
     candidate_entities = []
     current_entity = []
     
     for i, pred_class in enumerate(preds):
         start, end = offset_mapping[i]
-        if start == end: continue # 跳过 [CLS] [SEP]
+        if start == end: continue 
         
-        token_str = raw_path[start:end]
-        label_str = "O" if pred_class == 0 else ("B" if pred_class == 1 else "I")
-        # 获取当前预测类别的具体概率
         conf = probs[i][pred_class]
         
-        # 将调试信息存入列表：Token | 标签 | 置信度
-        if has_dbg:
-            debug_info.append(f"{token_str:<8} | {label_str} | {conf:.4f}")
-
-        if pred_class in [1, 2]:
-            current_entity.append({'start': start, 'end': end, 'conf': conf})
-        else:
+        if pred_class == 1:  # B 标签：强制结束上一个，开始一个新的
+            if current_entity:
+                candidate_entities.append(current_entity)
+            current_entity = [{'start': start, 'end': end, 'conf': conf, 'token': raw_path[start:end], 'label': 'B'}]
+            
+        elif pred_class == 2:  # I 标签：接在当前实体后面
+            if current_entity:
+                current_entity.append({'start': start, 'end': end, 'conf': conf, 'token': raw_path[start:end], 'label': 'I'})
+            else:
+                # 如果第一个就是 I，当做 B 处理（增强鲁棒性）
+                current_entity = [{'start': start, 'end': end, 'conf': conf, 'token': raw_path[start:end], 'label': 'I'}]
+        
+        else:  # O 标签：结束当前实体
             if current_entity:
                 candidate_entities.append(current_entity)
                 current_entity = []
@@ -326,48 +323,44 @@ def predict_single(raw_path, model, tokenizer):
     if current_entity:
         candidate_entities.append(current_entity)
 
-    # --- Debug 打印部分 ---
+    # --- 2. Debug 打印所有候选者及其分数 ---
+    has_dbg = os.path.exists("dbg")
     if has_dbg:
         print(f"\nPATH: {raw_path}")
-        print(f"{'Token':<8} | Lbl | Conf")
-        print("-" * 25)
-        for info in debug_info:
-            print(info)
+        print("-" * 40)
+        # 顺便打印下逐个 token 的情况
+        for i, pred_class in enumerate(preds):
+            s, e = offset_mapping[i]
+            if s == e: continue
+            lbl = "O" if pred_class == 0 else ("B" if pred_class == 1 else "I")
+            print(f"{raw_path[s:e]:<10} | {lbl} | {probs[i][pred_class]:.4f}")
+        print("-" * 40)
 
-    # --- 后处理合并逻辑 (Gap Filling) ---
-    merged_candidates = []
-    if candidate_entities:
-        curr_merged = candidate_entities[0]
-        for next_ent in candidate_entities[1:]:
-            prev_end = curr_merged[-1]['end']
-            next_start = next_ent[0]['start']
-            gap_str = raw_path[prev_end:next_start]
-            if (next_start - prev_end) < 5 and not any(c.isalnum() for c in gap_str):
-                curr_merged.extend(next_ent)
-            else:
-                merged_candidates.append(curr_merged)
-                curr_merged = next_ent
-        merged_candidates.append(curr_merged)
-
-    # --- 择优：取平均概率最大的实体 ---
+    # --- 3. 比较各个实体，取平均置信度最高的 ---
     final_res = ""
     best_score = -1.0
     
-    for cand in merged_candidates:
-        avg_conf = np.mean([item['conf'] for item in cand])
-        
-        char_start = cand[0]['start']
-        char_end = cand[-1]['end']
-        raw_extract = raw_path[char_start:char_end]
+    for cand in candidate_entities:
+        # 提取文本
+        c_start = cand[0]['start']
+        c_end = cand[-1]['end']
+        raw_extract = raw_path[c_start:c_end]
         cleaned_text = TextUtils.cleanup_result(raw_extract)
         
+        # 计算该片段的平均分
+        avg_conf = np.mean([item['conf'] for item in cand])
+        
+        if has_dbg:
+            print(f"Candidate: {raw_extract:<20} | Score: {avg_conf:.4f}")
+
         if cleaned_text and avg_conf > best_score:
             best_score = avg_conf
             final_res = cleaned_text
 
+    # --- 4. 输出 ---
     if final_res:
-        if has_dbg: print(f"Selected: {final_res} (Score: {best_score:.4f})")
-        print(f"{raw_path}#{final_res}")
+        if has_dbg: print(f"Final Win: {final_res}")
+        print(f"{raw_path}# {final_res}")
     else:
         print(f"{raw_path}#")
 
