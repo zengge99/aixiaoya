@@ -173,6 +173,15 @@ def init_onnx_session():
     
     return sess, tokenizer
 
+def softmax_np(x):
+    """
+    使用 NumPy 实现 Softmax，处理 BERT 输出的 Logits。
+    x 的形状通常是 (1, seq_len, 3) 或 (seq_len, 3)
+    """
+    # 减去最大值是为了数值稳定性，防止 np.exp 计算出无穷大 (Overflow)
+    e_x = np.exp(x - np.max(x, axis=-1, keepdims=True))
+    return e_x / e_x.sum(axis=-1, keepdims=True)
+
 def do_inference(raw_path, ort_session, tokenizer):
     if not raw_path.strip() or raw_path.startswith('#'): return
     raw_path = raw_path.strip()
