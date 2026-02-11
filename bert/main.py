@@ -70,6 +70,7 @@ class TextUtils:
         text = re.sub(r'\s+', ' ', text)
         return text
 
+    @staticmethod
     def cleanup_result(text):
         if not text: 
             return ""
