@@ -3,14 +3,22 @@ import torch.nn.functional as F
 import os
 import numpy as np
 import onnxruntime as ort
-from main import NERModel, BERT_LOCAL_FOLDER, MODEL_WEIGHTS_PATH, MAX_LEN, NUM_LABELS
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
+try:
+    from main import NERModel, BERT_LOCAL_FOLDER, MODEL_WEIGHTS_PATH, MAX_LEN, NUM_LABELS
+except ImportError as e:
+    print(f"导入失败: {e}")
+    print(f"当前搜索路径: {sys.path}")
+    sys.exit(1)
 
 ONNX_PATH = "movie_ner_bert.onnx"
 
 def export_and_verify():
     # --- 1. 加载模型 ---
     print(f"正在从 {BERT_LOCAL_FOLDER} 加载架构...")
-    
+
     model = NERModel(BERT_LOCAL_FOLDER)
     
     print(f"正在加载权重: {MODEL_WEIGHTS_PATH}")
