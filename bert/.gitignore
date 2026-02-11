@@ -1,3 +1,5 @@
 movie_ner_bert.onnx
 movie_ner_bert.onnx.data
 movie_ner_bert_model.zip
+save_path
+movie_model_full.zip
