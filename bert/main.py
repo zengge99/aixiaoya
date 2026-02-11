@@ -75,7 +75,7 @@ class TextUtils:
             return ""
         text = text.strip(" .-_[]()/\\")
         text = re.sub(r'[.\-_\[\]()/]', ' ', text)
-        text = re.sub(r'\s+', ' ', text)
+        # text = re.sub(r'\s+', ' ', text)
         return text
 
 # --- 3. 自动下载逻辑 ---
