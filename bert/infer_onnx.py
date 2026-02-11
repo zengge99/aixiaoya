@@ -7,6 +7,7 @@ import os
 import argparse
 import numpy as np
 from flask import Flask, request, jsonify
+from threading import Lock
 
 # --- 全局配置 ---
 MAX_LEN = 128
@@ -311,18 +312,24 @@ def run_batch_predict(file_path, sess, tokenizer):
 # --- HTTP 服务模式 ---
 def start_server(port, sess, tokenizer):
     app = Flask(__name__)
+    inference_lock = Lock()
 
     @app.route('/')
     def api_extract():
         q = request.args.get('q', '')
         if not q:
             return jsonify({"error": "missing parameter q"}), 400
-        result = do_inference(q, sess, tokenizer)
+        
+        # 使用锁来包裹推理过程
+        with inference_lock:
+            result = do_inference(q, sess, tokenizer)
+        
         print(f"{result}")
         return result  # 直接返回提取出的字符串
 
     print(f"🚀 HTTP 服务已启动: http://0.0.0.0:{port}")
     print(f"📌 使用示例: http://127.0.0.1:{port}/?q=你的影片路径")
+    
     app.run(host='0.0.0.0', port=port, debug=False)
 
 # --- 入口控制 ---
