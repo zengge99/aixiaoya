@@ -360,7 +360,7 @@ def predict_single(raw_path, model, tokenizer):
     # --- 4. 输出 ---
     if final_res:
         if has_dbg: print(f"Final Win: {final_res}")
-        print(f"{raw_path}# {final_res}")
+        print(f"{raw_path}#{final_res}")
     else:
         print(f"{raw_path}#")
 
