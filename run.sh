@@ -1,133 +1,47 @@
 #!/bin/bash
 
-# --- webdav反代服务配置区 ---
-webdav_server="http://8.138.152.202:5678"
-webdav_user="guest"
-webdav_password="guest_Api789"
-webdav_port="65432"
+# 1. 配置变量
+FILE1="movie_ner_bert.onnx"
+FILE2="movie_ner_bert.onnx.data"
+DIR1="save_path"
+TEMP_ZIP="movie_model_full.zip"
+CHUNK_SIZE="49M"
+PREFIX="movie_model_full.zip.part"
 
-# --- 索引扫描配置区，默认与webdav配置一致，也可以单独设置---
-index_server="$webdav_server"
-index_user="$webdav_user"
-index_password="$webdav_password"
-tasks=(
-    # 默认不扫描目录索引，扫描会增大网盘风控概率，不建议扫描。如需扫描取消如下注释。
-    #"/🏷️我的115分享|115share.txt"
-    #"/每日更新|daily.txt"
-    #"/电影|dy.txt"
-    #"/电视剧|dsj.txt"
-    #"/综艺|zy.txt"
-    #"/纪录片|jlp.txt"
-    #"/整理中|zlz.txt"
-) 
+# 2. 检查文件和目录是否存在
+echo "检查文件和文件夹..."
+if [ ! -f "$FILE1" ]; then echo "错误: 找不到 $FILE1"; exit 1; fi
+if [ ! -f "$FILE2" ]; then echo "错误: 找不到 $FILE2"; exit 1; fi
+if [ ! -d "$DIR1" ]; then echo "错误: 找不到目录 $DIR1"; exit 1; fi
 
-# --- 脚本路径解析 ---
-prog="$0"
-while [ -h "${prog}" ]; do
-    newProg=`/bin/ls -ld "${prog}"`
-    newProg=`expr "${newProg}" : ".* -> \(.*\)$"`
-    if expr "x${newProg}" : 'x/' >/dev/null; then
-        prog="${newProg}"
-    else
-        progdir=`dirname "${prog}"`
-        prog="${progdir}/${newProg}"
-    fi
-done
-cd "$(dirname "${prog}")"
+# 3. 创建 ZIP 压缩包
+# -r: 递归压缩文件夹
+# -q: 静默模式
+echo "正在打包压缩 $FILE1, $FILE2 和 $DIR1 ..."
+zip -rq "$TEMP_ZIP" "$FILE1" "$FILE2" "$DIR1"
 
-# --- 架构检测 ---
-machine=$(uname -m)
-if [[ "$machine" == *"arm"* || "$machine" == *"aarch"* ]]; then
-    arch="arm64"
-else
-    arch="amd64"
-fi
+# 4. 拆分压缩包
+echo "正在拆分压缩包为 ${CHUNK_SIZE} 的分卷..."
+split -b $CHUNK_SIZE -d "$TEMP_ZIP" "$PREFIX"
 
-# --- 进程管理逻辑 ---
-PIDS=() 
+# 5. 清理临时的巨大压缩包
+rm "$TEMP_ZIP"
 
-# 停止先前运行的残留进程
-stop_existing() {
-    echo "[!] 检查并清理旧的后台进程..."
-    
-    # 1. 根据二进制名称清理 (匹配所有架构版本)
-    # pkill -f 匹配完整命令行，比 killall 更强大
-    pkill -f "movie_extractor_linux_" >/dev/null 2>&1
-    pkill -f "webdav_linux_" >/dev/null 2>&1
-    
-    # 2. 根据端口清理 (防止进程名变了但端口仍被占用)
-    # 尝试使用 fuser 杀掉占用端口的进程（如果系统安装了 psmisc）
-    fuser -k 8889/tcp >/dev/null 2>&1
-    fuser -k ${webdav_port}/tcp >/dev/null 2>&1
-    
-    sleep 1 # 等待进程完全退出
-}
+echo "拆分完成，分卷如下："
+ls -lh ${PREFIX}*
 
-# 当前运行中的清理函数（Ctrl+C 时触发）
-cleanup() {
-    echo -e "\n\033[31m[!] 接收到中断信号，正在清理当前后台进程...\033[0m"
-    for pid in "${PIDS[@]}"; do
-        if kill -0 "$pid" >/dev/null 2>&1; then
-            kill "$pid" >/dev/null 2>&1
-        fi
-    done
-    echo "[+] 清理完成，退出。"
-    exit 0
-}
-
-# 捕获信号
-trap cleanup SIGINT SIGTERM
-
-# --- 执行开始 ---
-
-# 1. 彻底清理旧进程
-stop_existing
-
-# 2. 准备权限
-chmod 755 "movie_extractor_linux_$arch" "webdav_linux_$arch" "getalist_linux_$arch"
-
-# 3. 启动后台服务
-echo "[+] 正在启动后台服务..."
-
-# 启动 movie_extractor (端口 8889)
-./movie_extractor_linux_$arch --srv 8889 >/dev/null 2>&1 &
-PIDS+=($!)
-
-# 启动 webdav (端口 $webdav_port)
-touch fake.txt
-./webdav_linux_$arch --file "*.txt" --url "$webdav_server/dav" --user "$webdav_user" --password "$webdav_password" --port "$webdav_port" --obfuscate &
-PIDS+=($!)
-
-# 验证后台进程是否成功启动
-sleep 2
-for pid in "${PIDS[@]}"; do
-    if ! kill -0 "$pid" >/dev/null 2>&1; then
-        echo -e "\033[31m[错误] 后台进程 $pid 启动失败，请检查配置或权限。\033[0m"
-        exit 1
+# 6. 自动更新 .gitignore
+echo "更新 .gitignore..."
+for item in "$FILE1" "$FILE2" "$DIR1" "$TEMP_ZIP"; do
+    if ! grep -q "^$item$" .gitignore 2>/dev/null; then
+        echo "$item" >> .gitignore
     fi
 done
 
-echo "[+] 后台服务已就绪 (PIDs: ${PIDS[*]})"
+# 7. Git 推送
+echo "正在推送到 GitHub..."
+git add "${PREFIX}*" .gitignore
+git commit -m "Add split zip parts of model and save_path directory"
+git push
 
-# 4. 执行循环任务
-for task in "${tasks[@]}"; do
-    url="$index_server${task%%|*}"
-    output="${task##*|}"
-    
-    echo "----------------------------------------"
-    echo "正在处理: $url"
-    echo "保存到: $output"
-    
-    ./getalist_linux_$arch --url "$url" --user "$index_user" --password "$index_password" --output "$output" --sleep "0.3"
-    
-    if [ $? -ne 0 ]; then
-        echo "[!] getalist 任务中断"
-        cleanup
-    fi
-done
-
-echo "----------------------------------------"
-echo "[+] 所有任务处理完成！"
-
-# 正常退出提示
-read -t 5 -p "脚本任务已完成，后台服务将继续运行。按 Ctrl+C 停止服务，或等待 5 秒自动退出脚本..." || echo ""
+echo "全部任务已完成！"
