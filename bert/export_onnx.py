@@ -4,15 +4,7 @@ import os
 import sys
 import numpy as np
 import onnxruntime as ort
-
-current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(current_dir)
-try:
-    from main import NERModel, BERT_LOCAL_FOLDER, MODEL_WEIGHTS_PATH, MAX_LEN, NUM_LABELS
-except ImportError as e:
-    print(f"导入失败: {e}")
-    print(f"当前搜索路径: {sys.path}")
-    sys.exit(1)
+from main import NERModel, BERT_LOCAL_FOLDER, MODEL_WEIGHTS_PATH, MAX_LEN, NUM_LABELS
 
 ONNX_PATH = "movie_ner_bert.onnx"
 
