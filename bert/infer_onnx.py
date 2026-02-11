@@ -277,6 +277,9 @@ def do_inference(raw_path, ort_session, tokenizer):
         cleaned_text = TextUtils.cleanup_result(raw_extract)
         
         avg_conf = np.mean([item['conf'] for item in cand])
+
+        if has_dbg:
+            print(f"Candidate: {raw_extract:<20} | Score: {avg_conf:.4f}")
         
         if cleaned_text and avg_conf > best_score:
             best_score = avg_conf
