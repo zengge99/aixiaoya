@@ -141,10 +141,10 @@ def get_reconstructed_path(file_path):
         if tmdbid and s and e:
             # 这里的逻辑是保持原目录结构，但在剧集根目录下插入 {tmdb-id} 文件夹
             new_parts = parts[:root_idx+1] + [f"{{tmdb-{tmdbid}}}"] + parts[root_idx+1:-1] + [new_filename]
-            return "/".join(new_parts)
+            return "/".join(new_parts).replace('#', "")
         else:
             with stats_lock: stats["failed"] += 1
-            return "刮削失败/" + "/".join(parts[:-1] + [new_filename])
+            return "刮削失败/" + "/".join(parts[:-1] + [new_filename]).replace('#', "")
     else:
         # Movie 逻辑
         movie_nfo_path = os.path.splitext(file_path)[0] + ".nfo"
@@ -162,10 +162,10 @@ def get_reconstructed_path(file_path):
             if res: name_parts.append(res)
             new_filename = (".".join(name_parts) if name_parts else os.path.splitext(parts[-1])[0]) + ".strm"
             new_parts = parts[:-1] + [f"{{tmdb-{tmdbid}}}"] + [new_filename]
-            return "/".join(new_parts)
+            return "/".join(new_parts).replace('#', "")
         else:
             with stats_lock: stats["failed"] += 1
-            return "刮削失败/" + "/".join(parts)
+            return "刮削失败/" + "/".join(parts).replace('#', "")
 
 def process_file(file_path):
     if file_path.lower().endswith('.strm'):
