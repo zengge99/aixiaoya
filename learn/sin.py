@@ -28,7 +28,7 @@ class SimpleNN(nn.Module):
 
 # 3. 训练模型（拟合过程）
 model = SimpleNN()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.01)  # 优化器（调整参数）
+optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)  # 优化器（调整参数）
 loss_fn = nn.MSELoss()  # 损失函数（衡量预测误差）
 
 epochs = 4000  # 训练轮数
@@ -82,4 +82,5 @@ print(f"最大绝对误差：{max_error:.6f}")
 print(f"均方误差（MSE）：{mse_error:.6f}")
 
 print("\n结论：误差越小，说明AI拟合sin函数的效果越好（通常平均误差<0.05即拟合效果优秀）")
+
 
