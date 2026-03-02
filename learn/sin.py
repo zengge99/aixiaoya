@@ -31,7 +31,7 @@ model = SimpleNN()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)  # 优化器（调整参数）
 loss_fn = nn.MSELoss()  # 损失函数（衡量预测误差）
 
-epochs = 4000  # 训练轮数
+epochs = 10000  # 训练轮数
 print("===== 开始训练模型 =====")
 for epoch in range(epochs):
     model.train()
@@ -43,7 +43,7 @@ for epoch in range(epochs):
     optimizer.step()       # 调整参数
     
     # 每200轮打印一次损失（看误差是否变小）
-    if (epoch + 1) % 200 == 0:
+    if (epoch + 1) % 2000 == 0:
         print(f"训练轮数：{epoch+1}/{epochs} | 当前损失值：{loss.item():.6f}")
 
 # 4. 纯命令行验证拟合效果（无可视化）
@@ -82,5 +82,6 @@ print(f"最大绝对误差：{max_error:.6f}")
 print(f"均方误差（MSE）：{mse_error:.6f}")
 
 print("\n结论：误差越小，说明AI拟合sin函数的效果越好（通常平均误差<0.05即拟合效果优秀）")
+
 
 
