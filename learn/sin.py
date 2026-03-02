@@ -3,8 +3,8 @@ import torch.nn as nn
 import numpy as np
 
 # 1. 生成sin函数的采样数据（模拟你给AI的“未知数据”）
-# 随机生成5000个x值，范围在[0, 2π]
-x = np.random.uniform(0, 2*np.pi, 5000)
+# 随机生成500个x值，范围在[0, 2π]
+x = np.random.uniform(0, 2*np.pi, 500)
 # 计算对应的y=sin(x)
 y = np.sin(x)
 
