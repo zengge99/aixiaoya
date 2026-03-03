@@ -199,9 +199,9 @@ class MovieDataset(Dataset):
         }
 
 # --- 6. 训练流程 ---
-def validate_model(model, loader, criterion, device):
+def validate_one_epoch(model, loader, criterion, device):
     model.eval()
-    val_loss = 0
+    v_loss = 0
     with torch.no_grad():
         for batch in loader:
             input_ids = batch['input_ids'].to(device)
@@ -209,8 +209,8 @@ def validate_model(model, loader, criterion, device):
             labels = batch['labels'].to(device)
             logits = model(input_ids, mask)
             loss = criterion(logits.view(-1, NUM_LABELS), labels.view(-1))
-            val_loss += loss.item()
-    return val_loss / len(loader) if len(loader) > 0 else float('inf')
+            v_loss += loss.item()
+    return v_loss / len(loader) if len(loader) > 0 else float('inf')
 
 def run_train(incremental=False):
     set_seed(SEED)
@@ -219,100 +219,117 @@ def run_train(incremental=False):
     bert_path = get_bert_path()
     tokenizer = BertTokenizer.from_pretrained(bert_path)
 
-    # 1. 查找数据文件并排序
+    # 1. 查找数据文件并排序，确保 index 0 总是同一个基础文件
     data_files = sorted(glob.glob(DATA_FILE_PATTERN))
     if not data_files:
-        print(f"❌ 未找到训练数据 {DATA_FILE_PATTERN}"); return
+        print(f"❌ 未找到匹配 {DATA_FILE_PATTERN} 的数据文件。"); return
     
     print(f"模式: {'【增量训练】' if incremental else '【全量训练】'}")
-    
-    final_train_lines = []
-    final_val_lines = []
-    
-    # 使用独立随机实例确保切分逻辑永远一致
-    rng = random.Random(SEED)
+    print(f"发现 {len(data_files)} 个数据文件: {data_files}")
 
-    # 2. 遍历文件，按文件进行确定性切分
+    all_train_lines = []
+    all_val_lines = []
+    
+    # 使用独立的 Random 实例确保 shuffle 逻辑在多次运行时完全一致
+    rng = random.Random(SEED)
+    
+    # 2. 遍历处理每个文件
     for i, f_path in enumerate(data_files):
         with open(f_path, 'r', encoding='utf-8') as f:
-            lines = [l.strip() for l in f.readlines() if '#' in l]
+            lines = [l.strip() for l in f.readlines() if '#' in l.strip()]
         
-        # 确定性打乱
+        # 步骤 A: 确定性打乱
         rng.shuffle(lines)
+        total_raw = len(lines)
+        if total_raw == 0: continue
         
-        # 划分界限 (95% 训练, 5% 验证)
-        split_idx = int(len(lines) * 0.95)
+        # 步骤 B: 无论如何，永远固定 90/10 划分池子
+        split_idx = int(total_raw * 0.9)
         file_train_pool = lines[:split_idx]
         file_val_pool = lines[split_idx:]
-
-        # 增量训练逻辑：第一个文件视为“基础文件”
+        
+        # 步骤 C: 处理保留逻辑
         if incremental and i == 0:
-            # 从基础文件的训练池中仅抽取 5% (可调)
-            sample_size = max(1, int(len(file_train_pool) * 0.05))
-            selected_train = file_train_pool[:sample_size]
-            print(f" 📂 [基础文件] {os.path.basename(f_path)}: 采样 {len(selected_train)} 条进入训练集 (池大小: {len(file_train_pool)})")
+            # 基础文件：仅保留 2% 的训练数据，以及 2% 的验证数据 (保持分布比例一致)
+            keep_train_count = max(1, int(len(file_train_pool) * 0.02))
+            keep_val_count = max(1, int(len(file_val_pool) * 0.02))
+            
+            final_train = file_train_pool[:keep_train_count]
+            final_val = file_val_pool[:keep_val_count]
+            print(f"  └─ [基础文件] {os.path.basename(f_path)}: 采样保留 2% (训练:{len(final_train)} / 验证:{len(final_val)})")
         else:
-            selected_train = file_train_pool
-            print(f" 📂 [新增/全量] {os.path.basename(f_path)}: 使用全部 {len(selected_train)} 条数据")
+            # 新文件或全量模式：保留全部
+            final_train = file_train_pool
+            final_val = file_val_pool
+            print(f"  └─ [新增数据] {os.path.basename(f_path)}: 全量读取 (训练:{len(final_train)} / 验证:{len(final_val)})")
 
-        final_train_lines.extend(selected_train)
-        final_val_lines.extend(file_val_pool)
+        all_train_lines.extend(final_train)
+        all_val_lines.extend(final_val)
 
-    # 3. 构建 Dataset
-    train_ds = MovieDataset(final_train_lines, tokenizer)
-    val_ds = MovieDataset(final_val_lines, tokenizer)
-    print(f"📊 最终规模 -> 训练集: {len(train_ds)} | 验证集: {len(val_ds)}")
+    print(f"\n📊 数据集准备完毕: 训练集 {len(all_train_lines)} 条 | 验证集 {len(all_val_lines)} 条")
 
+    # 3. 创建 Dataset 和 Loader
+    train_ds = MovieDataset(all_train_lines, tokenizer)
+    val_ds = MovieDataset(all_val_lines, tokenizer)
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=min(2, NUM_THREADS))
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False)
-    
-    # 4. 初始化模型与 Loss
+
+    # 4. 初始化模型
     model = NERModel(bert_path).to(device)
     class_weights = torch.tensor([1.0, 10.0, 8.0]).to(device)
     criterion = nn.CrossEntropyLoss(weight=class_weights, ignore_index=-100)
     optimizer = optim.AdamW(model.parameters(), lr=LR)
+    
+    best_val_loss = float('inf')
 
-    best_loss = float('inf')
-
-    # 5. 计算基线损失 (Baseline Loss)
+    # 5. 加载逻辑与基线损失计算
     if os.path.exists(MODEL_WEIGHTS_PATH):
-        print(f"🔄 检测到现有权重，正在计算基线损失...")
+        print(f"🔄 检测到现有模型，加载权重并计算基线 Loss...")
         model.load_state_dict(torch.load(MODEL_WEIGHTS_PATH, map_location=device))
-        best_loss = validate_model(model, val_loader, criterion, device)
-        print(f"📈 当前模型基线 Val Loss: {best_loss:.4f}")
+        
+        if len(val_ds) > 0:
+            # 在开始训练前，先看旧模型在当前验证集上的表现
+            best_val_loss = validate_one_epoch(model, val_loader, criterion, device)
+            print(f"📈 当前模型基准验证 Loss: {best_val_loss:.4f}")
     else:
-        print("🆕 未检测到模型权重，将从头开始训练。")
-
+        print("🆕 未检测到模型，将从头开始训练。")
+    
     # 6. 训练循环
-    for epoch in range(EPOCHS):
-        model.train()
-        total_train_loss = 0
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS}")
-        
-        for batch in pbar:
-            optimizer.zero_grad()
-            input_ids = batch['input_ids'].to(device)
-            mask = batch['attention_mask'].to(device)
-            labels = batch['labels'].to(device)
+    try:
+        for epoch in range(EPOCHS):
+            model.train()
+            pbar = tqdm(train_loader, desc=f"Epoch {epoch+1:02d}")
+            for batch in pbar:
+                optimizer.zero_grad()
+                input_ids = batch['input_ids'].to(device)
+                mask = batch['attention_mask'].to(device)
+                labels = batch['labels'].to(device)
+                
+                logits = model(input_ids, mask)
+                loss = criterion(logits.view(-1, NUM_LABELS), labels.view(-1))
+                
+                loss.backward()
+                # 梯度裁剪
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                optimizer.step()
+                pbar.set_postfix(loss=f"{loss.item():.4f}")
             
-            logits = model(input_ids, mask)
-            loss = criterion(logits.view(-1, NUM_LABELS), labels.view(-1))
-            
-            loss.backward()
-            optimizer.step()
-            total_train_loss += loss.item()
-            pbar.set_postfix(loss=f"{loss.item():.4f}")
-            
-        # 验证并保存
-        avg_val_loss = validate_model(model, val_loader, criterion, device)
-        print(f"   └─ Current Val Loss: {avg_val_loss:.4f} (Best: {best_loss:.4f})")
-        
-        if avg_val_loss < best_loss:
-            best_loss = avg_val_loss
-            torch.save(model.state_dict(), MODEL_WEIGHTS_PATH)
-            print(f"   ✨ 验证集 Loss 优化，模型已更新保存。")
-        else:
-            print(f"   ⏳ 本轮未超过最佳模型，跳过保存。")
+            # 验证
+            if len(val_ds) > 0:
+                avg_val_loss = validate_one_epoch(model, val_loader, criterion, device)
+                
+                if avg_val_loss < best_val_loss:
+                    print(f"  ✨ 验证集优化 ({best_val_loss:.4f} -> {avg_val_loss:.4f})，保存模型。")
+                    best_val_loss = avg_val_loss
+                    torch.save(model.state_dict(), MODEL_WEIGHTS_PATH)
+                else:
+                    print(f"  ⏳ 验证集 Loss: {avg_val_loss:.4f} (未提升，最佳: {best_val_loss:.4f})")
+            else:
+                # 无验证集时直接保存
+                torch.save(model.state_dict(), MODEL_WEIGHTS_PATH)
+                
+    except KeyboardInterrupt:
+        print("\n🛑 用户手动停止训练。")
 
 # --- 7. 预测流程 (适配 BIO) ---
 def predict_single(raw_path, model, tokenizer):
