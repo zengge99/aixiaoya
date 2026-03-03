@@ -229,7 +229,7 @@ def run_train(incremental=False):
     # 1. 查找数据文件并排序，确保 index 0 始终为基础文件
     data_files = sorted(glob.glob(DATA_FILE_PATTERN))
     if not data_files:
-        print(f"❌ 未找到匹配 {DATA_FILE_PATTERN} 的数据文件。"); return
+        print(f"未找到匹配 {DATA_FILE_PATTERN} 的数据文件。"); return
     
     print(f"模式: {'【增量训练】' if incremental else '【全量训练】'}")
     
@@ -257,17 +257,17 @@ def run_train(incremental=False):
             
             selected_train = file_train_pool[:k_train]
             selected_val = file_val_pool[:k_val]
-            print(f" 📂 [基础文件] {os.path.basename(f_path)}: 采样保留 2% (训:{len(selected_train)}/验:{len(selected_val)})")
+            print(f"[基础文件] {os.path.basename(f_path)}: 采样保留 2% (训:{len(selected_train)}/验:{len(selected_val)})")
         else:
             # 新文件或全量模式
             selected_train = file_train_pool
             selected_val = file_val_pool
-            print(f" 📂 [数据文件] {os.path.basename(f_path)}: 全量读取 (训:{len(selected_train)}/验:{len(selected_val)})")
+            print(f"[数据文件] {os.path.basename(f_path)}: 全量读取 (训:{len(selected_train)}/验:{len(selected_val)})")
 
         all_train_lines.extend(selected_train)
         all_val_lines.extend(selected_val)
 
-    print(f"📊 总规模 -> 训练集: {len(all_train_lines)} | 验证集: {len(all_val_lines)}\n")
+    print(f"总规模 -> 训练集: {len(all_train_lines)} | 验证集: {len(all_val_lines)}\n")
 
     # 3. 构建 DataLoaders
     train_ds = MovieDataset(all_train_lines, tokenizer)
@@ -285,15 +285,15 @@ def run_train(incremental=False):
 
     # 5. 加载模型并计算带进度条的基线损失
     if os.path.exists(MODEL_WEIGHTS_PATH):
-        print(f"🔄 加载现有模型权重: {MODEL_WEIGHTS_PATH}")
+        print(f"加载现有模型权重: {MODEL_WEIGHTS_PATH}")
         model.load_state_dict(torch.load(MODEL_WEIGHTS_PATH, map_location=device))
         
         if len(val_ds) > 0:
             # 调用带进度的验证函数
-            best_val_loss = validate_one_epoch(model, val_loader, criterion, device, desc="📊 计算初始基线 Loss")
-            print(f"📈 当前模型基准 Loss: {best_val_loss:.4f}")
+            best_val_loss = validate_one_epoch(model, val_loader, criterion, device, desc="计算初始基线 Loss")
+            print(f"当前模型基准 Loss: {best_val_loss:.4f}")
     else:
-        print("🆕 未检测到现有模型，将从零开始训练。")
+        print("未检测到现有模型，将从零开始训练。")
     
     # 6. 正式训练 Epoch 循环
     try:
@@ -319,17 +319,17 @@ def run_train(incremental=False):
                 current_val_loss = validate_one_epoch(model, val_loader, criterion, device, desc=f"🔍 Epoch {epoch+1} 验证")
                 
                 if current_val_loss < best_val_loss:
-                    print(f" ✨ 验证集优化 ({best_val_loss:.4f} -> {current_val_loss:.4f})，保存更新模型。")
+                    print(f"验证集优化 ({best_val_loss:.4f} -> {current_val_loss:.4f})，保存更新模型。")
                     best_val_loss = current_val_loss
                     torch.save(model.state_dict(), MODEL_WEIGHTS_PATH)
                 else:
-                    print(f" ⏳ Val Loss: {current_val_loss:.4f} (未提升，最佳: {best_val_loss:.4f})")
+                    print(f"Val Loss: {current_val_loss:.4f} (未提升，最佳: {best_val_loss:.4f})")
             else:
                 # 无验证集保护
                 torch.save(model.state_dict(), MODEL_WEIGHTS_PATH)
                 
     except KeyboardInterrupt:
-        print("\n🛑 用户手动中断训练。")
+        print("\n用户手动中断训练。")
 
 # --- 7. 预测流程 (适配 BIO) ---
 def predict_single(raw_path, model, tokenizer):
