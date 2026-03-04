@@ -319,6 +319,8 @@ def start_server(port, sess, tokenizer):
         q = request.args.get('q', '')
         if not q:
             return jsonify({"error": "missing parameter q"}), 400
+
+        print(f"{q}")
         
         # 使用锁来包裹推理过程
         with inference_lock:
