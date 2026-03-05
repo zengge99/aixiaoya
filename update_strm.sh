@@ -49,6 +49,8 @@ for cmd in python3 unzip zip git; do
     fi
 done
 
+git pull 2>&1 >/dev/null
+
 # 3. 主循环
 while true; do
     echo "-------------------------------------------"
