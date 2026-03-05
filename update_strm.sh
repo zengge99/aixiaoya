@@ -55,7 +55,8 @@ while true; do
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] 开始更新任务..."
 
     git pull 2>&1 >/dev/null
-    
+    rm -f "$STRM_FILE" 2>&1 >/dev/null
+
     # 运行 Python 爬虫 (后台运行并等待，方便捕捉中断)
     python3 "$(dirname "$0")/strm_crawler.py" &
     PYTHON_PID=$!
