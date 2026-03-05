@@ -18,7 +18,7 @@ cleanup() {
     # 使用 -$$ 表示当前进程组
     trap - SIGINT SIGTERM # 清除 trap 防止死循环
     rm -f "$PID_FILE"
-    kill -9 -$$ 2>/dev/null
+    kill -9 -$$ 2>/dev/null 
 }
 
 # 注册信号捕捉
