@@ -75,6 +75,7 @@ while true; do
             grep -Fvxf "$STRM_FILE" .tmp_local_content > .tmp_filtered_content || true
             
             # 3. 比较行数，判断是否有重复项被删除
+            # 因为local_strm_list.zip可能是全量文件生成的，需要把爬虫服务器上有的删除
             ORIG_COUNT=$(wc -l < .tmp_local_content)
             NEW_COUNT=$(wc -l < .tmp_filtered_content)
             
