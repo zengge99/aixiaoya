@@ -66,7 +66,32 @@ while true; do
     if [ $? -eq 0 ]; then
         # 处理本地 ZIP 文件
         if [ -f "$LOCAL_ZIP" ]; then
-            unzip -p "$LOCAL_ZIP" >> "$STRM_FILE"
+            echo "[INFO] 正在处理本地 ZIP 数据..."
+            # 1. 提取本地 ZIP 内容到临时文件
+            unzip -p "$LOCAL_ZIP" > .tmp_local_content
+            
+            # 2. 过滤：保留那些“不在 STRM_FILE 中”的行
+            # -F: 固定字符串, -v: 反向匹配, -x: 整行匹配, -f: 从文件读取匹配模板
+            grep -Fvxf "$STRM_FILE" .tmp_local_content > .tmp_filtered_content || true
+            
+            # 3. 比较行数，判断是否有重复项被删除
+            ORIG_COUNT=$(wc -l < .tmp_local_content)
+            NEW_COUNT=$(wc -l < .tmp_filtered_content)
+            
+            if [ "$NEW_COUNT" -lt "$ORIG_COUNT" ]; then
+                echo "[UPDATE] LOCAL_ZIP 中发现 $((ORIG_COUNT - NEW_COUNT)) 条重复项，正在清理..."
+                # 重新打包 LOCAL_ZIP (内部文件名固定为 local_strm_list.txt)
+                mv .tmp_filtered_content local_strm_list.txt
+                zip -qj "$LOCAL_ZIP" local_strm_list.txt
+                rm local_strm_list.txt
+                LOCAL_CHANGED=true
+            else
+                rm .tmp_filtered_content
+            fi
+
+            # 4. 将本地内容（去重前或去重后均可，因为后面有 sort -u）合并到主文件
+            cat .tmp_local_content >> "$STRM_FILE"
+            rm .tmp_local_content
             echo "[OK] 已合并本地数据。"
         fi
 
@@ -78,7 +103,15 @@ while true; do
             echo "[INFO] 当前总行数: $(wc -l < "$STRM_FILE")"
 
             zip -qj "$ZIP_FILE" "$STRM_FILE"
+            
+            # --- 修改部分：Git 提交逻辑 ---
             git add "$ZIP_FILE"
+            # 如果 LOCAL_ZIP 有变化，也加入暂存区
+            if [ "$LOCAL_CHANGED" = true ]; then
+                git add "$LOCAL_ZIP"
+                echo "[INFO] LOCAL_ZIP 已加入 Git 提交队列。"
+            fi
+
             if ! git diff --cached --quiet; then
                 git commit -m "自动更新strm，时间：$(date +'%Y-%m-%d %H:%M:%S')"
                 git push && echo "[SUCCESS] Git 推送成功。" || echo "[ERROR] 推送失败。"
