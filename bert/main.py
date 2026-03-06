@@ -149,6 +149,7 @@ class MovieDataset(Dataset):
 
         # 2. Tokenize
         text_for_bert = TextUtils.preprocess_for_bert(input_path)
+        tokenizer.truncation_side = 'left' 
         encoding = self.tokenizer(
             text_for_bert,
             return_offsets_mapping=True,
@@ -337,6 +338,7 @@ def predict_single(raw_path, model, tokenizer):
     raw_path = raw_path.strip()
 
     text_for_bert = TextUtils.preprocess_for_bert(raw_path)
+    tokenizer.truncation_side = 'left'
     inputs = tokenizer(
         text_for_bert,
         return_tensors="pt",
@@ -344,6 +346,8 @@ def predict_single(raw_path, model, tokenizer):
         truncation=True,
         max_length=MAX_LEN
     )
+
+    # todo: 如果iput_ids长度大于MAX_LEN，从后往前截取MAX_LEN。
     
     with torch.no_grad():
         logits = model(inputs['input_ids'], inputs['attention_mask'])
