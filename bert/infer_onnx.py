@@ -198,30 +198,22 @@ def do_inference(raw_path, ort_session, tokenizer):
 
     # --- 1. 前处理与 Tokenization ---
     text_for_bert = raw_path
+    tokenizer.truncation_side = 'left'
     inputs = tokenizer(
         text_for_bert,
         return_offsets_mapping=True,
-        truncation=False,   # 关闭自动截断，我们要手动从后往前截
-        padding=False 
+        truncation=True,
+        max_length=MAX_LEN,
+        padding=False # ONNX 支持动态长度时建议不强制填充到 128 以提升速度
     )
     
-    # 提取原始列表
-    input_ids_list = inputs['input_ids']
-    attention_mask_list = inputs['attention_mask']
-    offset_mapping = inputs['offset_mapping']
-
-    # 如果input_ids长度大于MAX_LEN，从后往前截取MAX_LEN。
-    # 注意：必须同步截取 offset_mapping，否则后续字符定位会错位
-    if len(input_ids_list) > MAX_LEN:
-        input_ids_list = input_ids_list[-MAX_LEN:]
-        attention_mask_list = attention_mask_list[-MAX_LEN:]
-        offset_mapping = offset_mapping[-MAX_LEN:]
-
     # 转换为 NumPy 格式并增加 Batch 维度 [1, seq_len]
-    input_ids = np.array(input_ids_list, dtype=np.int64)[None, :]
-    attention_mask = np.array(attention_mask_list, dtype=np.int64)[None, :]
+    input_ids = np.array(inputs['input_ids'], dtype=np.int64)[None, :]
+    attention_mask = np.array(inputs['attention_mask'], dtype=np.int64)[None, :]
 
     # --- 2. ONNX 执行推理 ---
+    # ort_session.run(输出节点名列表, 输入字典)
+    # 输入字典的 key 必须与导出时的 input_names ["input_ids", "attention_mask"] 一致
     ort_inputs = {
         "input_ids": input_ids,
         "attention_mask": attention_mask
@@ -229,16 +221,18 @@ def do_inference(raw_path, ort_session, tokenizer):
     logits = ort_session.run(None, ort_inputs)[0] # 输出形状 [1, seq_len, 3]
     
     # --- 3. 后处理 (Logits -> Probs -> Preds) ---
-    probs_seq = softmax_np(logits[0]) # [seq_len, 3]
+    probs_seq = softmax_np(logits[0]) # 取第一个 batch 并转为概率 [seq_len, 3]
     preds = np.argmax(probs_seq, axis=1) # [seq_len]
     
-    # --- 4. BIO 标签解析 ---
+    offset_mapping = inputs['offset_mapping']
+    
+    # --- 4. BIO 标签解析 (逻辑同原版) ---
     candidate_entities = []
     current_entity = []
     
     for i, pred_class in enumerate(preds):
         start, end = offset_mapping[i]
-        if start == end: continue # 跳过 [CLS], [SEP]
+        if start == end: continue # 跳过 [CLS], [SEP] 或填充部分
         
         conf = probs_seq[i][pred_class]
         
@@ -251,9 +245,10 @@ def do_inference(raw_path, ort_session, tokenizer):
             if current_entity:
                 current_entity.append({'start': start, 'end': end, 'conf': conf, 'token': raw_path[start:end]})
             else:
+                # 容错处理：若只有 I 出现，视作起始
                 current_entity = [{'start': start, 'end': end, 'conf': conf, 'token': raw_path[start:end]}]
         
-        else:  # O
+        else:  # O (Outside)
             if current_entity:
                 candidate_entities.append(current_entity)
                 current_entity = []
