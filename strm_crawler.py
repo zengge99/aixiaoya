@@ -15,6 +15,7 @@ warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 BASE_URL = "http://emby.xiaoya.pro/"
 OUTPUT_FILE = "strm.txt"
 THREAD_COUNT = 200 
+EXCLUDED_GENRES = ["Adult", "Erotica", "Erotic", "Sex", "Porn"]
 
 # --- 全局变量 ---
 task_queue = queue.Queue()
@@ -50,6 +51,10 @@ def get_xml_tag_text(root, tag):
                 return uid.text.strip()
     return ""
 
+def get_xml_tags_list(root, tag):
+    nodes = root.findall(tag)
+    return [node.text.strip() for node in nodes if node.text and node.text.strip()]
+
 def parse_nfo_data(url):
     session = get_session()
     try:
@@ -70,7 +75,8 @@ def parse_nfo_data(url):
                 "year": year,
                 "tmdbid": get_xml_tag_text(root, "tmdbid") or get_xml_tag_text(root, "tmdb"),
                 "season": get_xml_tag_text(root, "season"),
-                "episode": get_xml_tag_text(root, "episode")
+                "episode": get_xml_tag_text(root, "episode"),
+                "genres": get_xml_tags_list(root, "genre")
             }
     except: pass
     return None
@@ -100,7 +106,13 @@ def find_tv_root_context(strm_url):
         data = parse_nfo_data(nfo_url)
         
         if data:
-            info = {"has_tvshow": True, "tmdbid": data.get("tmdbid"), "title": data.get("title"), "year": data.get("year")}
+            info = {
+                "has_tvshow": True, 
+                "tmdbid": data.get("tmdbid"), 
+                "title": data.get("title"), 
+                "year": data.get("year"),
+                "genres": data.get("genres", [])
+            }
             with cache_lock:
                 dir_nfo_cache[search_url] = info
             return target_parts_idx, info
@@ -120,6 +132,10 @@ def extract_season_episode(filename):
     else:
         return None, None
 
+def check_is_restricted(genres):
+    if not genres: return False
+    return any(g.lower() in [eg.lower() for eg in EXCLUDED_GENRES] for g in genres)
+
 def get_reconstructed_path(url):
     decoded_url = unquote(url)
     rel_path = decoded_url.replace(BASE_URL.rstrip('/'), "").strip('/')
@@ -129,6 +145,8 @@ def get_reconstructed_path(url):
     res = extract_resolution(url)
     root_idx, tv_info = find_tv_root_context(url)
 
+    is_restricted = False
+
     if root_idx is not None:
         # TV 逻辑
         tmdbid = tv_info.get("tmdbid")
@@ -136,6 +154,9 @@ def get_reconstructed_path(url):
         ep_data = parse_nfo_data(ep_nfo_url)
         s = ep_data.get("season") if ep_data else None
         e = ep_data.get("episode") if ep_data else None
+        
+        if check_is_restricted(tv_info.get("genres", [])):
+            is_restricted = True
 
         if not s or not e:
             s, e = extract_season_episode(parts[-1])
@@ -156,17 +177,24 @@ def get_reconstructed_path(url):
 
         if tmdbid and s and e:
             new_parts = parts[:root_idx+1] + [f"{{tmdb-{tmdbid}}}"] + parts[root_idx+1:-1] + [new_filename]
-            return "/".join(new_parts).replace('#', "")
+            final_path = "/".join(new_parts).replace('#', "")
+            return f"限制级/{final_path}" if is_restricted else final_path
         else:
             with stats_lock: stats["failed"] += 1
-            return "刮削失败/" + "/".join(parts[:-1] + [new_filename]).replace('#', "")
+            final_path = "/".join(parts[:-1] + [new_filename]).replace('#', "")
+            prefix = "刮削失败/限制级/" if is_restricted else "刮削失败/"
+            return prefix + final_path
     else:
         # Movie 逻辑
         movie_nfo_url = url.rsplit('.', 1)[0] + ".nfo"
         movie_data = parse_nfo_data(movie_nfo_url)
+        
         if not movie_data:
             movie_data = parse_nfo_data(url.rsplit('/', 1)[0] + "/movie.nfo")
         
+        if movie_data and check_is_restricted(movie_data.get("genres", [])):
+            is_restricted = True
+
         if movie_data and movie_data.get("tmdbid"):
             tmdbid = movie_data["tmdbid"]
             title = movie_data.get("title")
@@ -177,10 +205,13 @@ def get_reconstructed_path(url):
             if res: name_parts.append(res)
             new_filename = (".".join(name_parts) if name_parts else parts[-1].rsplit('.', 1)[0]) + ".strm"
             new_parts = parts[:-1] + [f"{{tmdb-{tmdbid}}}"] + [new_filename]
-            return "/".join(new_parts).replace('#', "")
+            final_path = "/".join(new_parts).replace('#', "")
+            return f"限制级/{final_path}" if is_restricted else final_path
         else:
             with stats_lock: stats["failed"] += 1
-            return "刮削失败/" + rel_path.replace('#', "")
+            final_path = rel_path.replace('#', "")
+            prefix = "刮削失败/限制级/" if is_restricted else "刮削失败/"
+            return prefix + final_path
 
 def process_url(url):
     session = get_session()
@@ -237,9 +268,7 @@ def main():
             with stats_lock:
                 print(f"进度: 目录 {stats['dirs']} | strm {stats['files']} | 刮削失败 {stats['failed']} | 待处理队列 {task_queue.qsize()}    ", end='\r')
     except KeyboardInterrupt: pass
-    print(f"\n\n✅ 完成！")
+    print(f"\n\n✅ 完成！耗时: {int(time.time()-start_time)}s")
 
 if __name__ == "__main__":
-
     main()
-

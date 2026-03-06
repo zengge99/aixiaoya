@@ -10,6 +10,7 @@ from urllib.parse import unquote
 BASE_DIR = os.path.abspath(os.getcwd())  # 当前本地目录
 OUTPUT_FILE = "local_strm_list.txt"
 THREAD_COUNT = 20  # 本地 IO 建议线程数不用像网络请求那么大
+EXCLUDED_GENRES = ["Adult", "Erotica", "Erotic", "Sex", "Porn"]
 
 # --- 全局变量 ---
 task_queue = queue.Queue()
@@ -32,6 +33,10 @@ def get_xml_tag_text(root, tag):
                 return uid.text.strip()
     return ""
 
+def get_xml_tags_list(root, tag):
+    nodes = root.findall(tag)
+    return [node.text.strip() for node in nodes if node.text and node.text.strip()]
+
 def parse_nfo_data(file_path):
     if not os.path.exists(file_path):
         return None
@@ -51,7 +56,8 @@ def parse_nfo_data(file_path):
                 "year": year,
                 "tmdbid": get_xml_tag_text(root, "tmdbid") or get_xml_tag_text(root, "tmdb"),
                 "season": get_xml_tag_text(root, "season"),
-                "episode": get_xml_tag_text(root, "episode")
+                "episode": get_xml_tag_text(root, "episode"),
+                "genres": get_xml_tags_list(root, "genre")
             }
     except: pass
     return None
@@ -86,7 +92,13 @@ def find_tv_root_context(strm_path):
         data = parse_nfo_data(nfo_path)
         
         if data:
-            info = {"has_tvshow": True, "tmdbid": data.get("tmdbid"), "title": data.get("title"), "year": data.get("year")}
+                info = {
+                "has_tvshow": True, 
+                "tmdbid": data.get("tmdbid"), 
+                "title": data.get("title"), 
+                "year": data.get("year"),
+                "genres": data.get("genres", [])
+            }
             with cache_lock:
                 dir_nfo_cache[current_dir] = info
             target_parts_idx = len(parts) - 2 - i
@@ -106,12 +118,18 @@ def extract_season_episode(filename):
         return int(match.group(1)), int(match.group(2))
     return None, None
 
+def check_is_restricted(genres):
+    if not genres: return False
+    return any(g.lower() in [eg.lower() for eg in EXCLUDED_GENRES] for g in genres)
+
 def get_reconstructed_path(file_path):
     rel_path = os.path.relpath(file_path, BASE_DIR)
     parts = rel_path.split(os.sep)
     
     res = extract_resolution(file_path)
     root_idx, tv_info = find_tv_root_context(file_path)
+
+    is_restricted = False
 
     if root_idx is not None and root_idx >= 0:
         # TV 逻辑
@@ -120,6 +138,9 @@ def get_reconstructed_path(file_path):
         ep_data = parse_nfo_data(ep_nfo_path)
         s = ep_data.get("season") if ep_data else None
         e = ep_data.get("episode") if ep_data else None
+
+        if check_is_restricted(tv_info.get("genres", [])):
+            is_restricted = True
 
         if not s or not e:
             s, e = extract_season_episode(parts[-1])
@@ -139,18 +160,23 @@ def get_reconstructed_path(file_path):
                 new_filename = parts[-1]
 
         if tmdbid and s and e:
-            # 这里的逻辑是保持原目录结构，但在剧集根目录下插入 {tmdb-id} 文件夹
             new_parts = parts[:root_idx+1] + [f"{{tmdb-{tmdbid}}}"] + parts[root_idx+1:-1] + [new_filename]
-            return "/".join(new_parts).replace('#', "")
+            final_path = "/".join(new_parts).replace('#', "")
+            return f"限制级/{final_path}" if is_restricted else final_path
         else:
             with stats_lock: stats["failed"] += 1
-            return "刮削失败/" + "/".join(parts[:-1] + [new_filename]).replace('#', "")
+            final_path = "/".join(parts[:-1] + [new_filename]).replace('#', "")
+            prefix = "刮削失败/限制级/" if is_restricted else "刮削失败/"
+            return prefix + final_path
     else:
         # Movie 逻辑
         movie_nfo_path = os.path.splitext(file_path)[0] + ".nfo"
         movie_data = parse_nfo_data(movie_nfo_path)
         if not movie_data:
             movie_data = parse_nfo_data(os.path.join(os.path.dirname(file_path), "movie.nfo"))
+
+        if movie_data and check_is_restricted(movie_data.get("genres", [])):
+            is_restricted = True
         
         if movie_data and movie_data.get("tmdbid"):
             tmdbid = movie_data["tmdbid"]
@@ -162,10 +188,13 @@ def get_reconstructed_path(file_path):
             if res: name_parts.append(res)
             new_filename = (".".join(name_parts) if name_parts else os.path.splitext(parts[-1])[0]) + ".strm"
             new_parts = parts[:-1] + [f"{{tmdb-{tmdbid}}}"] + [new_filename]
-            return "/".join(new_parts).replace('#', "")
+            final_path = "/".join(new_parts).replace('#', "")
+            return f"限制级/{final_path}" if is_restricted else final_path
         else:
             with stats_lock: stats["failed"] += 1
-            return "刮削失败/" + "/".join(parts).replace('#', "")
+            final_path = rel_path.replace('#', "")
+            prefix = "刮削失败/限制级/" if is_restricted else "刮削失败/"
+            return prefix + final_path
 
 def process_file(file_path):
     if file_path.lower().endswith('.strm'):
