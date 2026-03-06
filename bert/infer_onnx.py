@@ -210,7 +210,7 @@ def do_inference(raw_path, ort_session, tokenizer):
     attention_mask_list = inputs['attention_mask']
     offset_mapping = inputs['offset_mapping']
 
-    # todo: 如果input_ids长度大于MAX_LEN，从后往前截取MAX_LEN。
+    # 如果input_ids长度大于MAX_LEN，从后往前截取MAX_LEN。
     # 注意：必须同步截取 offset_mapping，否则后续字符定位会错位
     if len(input_ids_list) > MAX_LEN:
         input_ids_list = input_ids_list[-MAX_LEN:]
