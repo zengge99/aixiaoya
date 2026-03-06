@@ -92,7 +92,7 @@ def find_tv_root_context(strm_path):
         data = parse_nfo_data(nfo_path)
         
         if data:
-                info = {
+            info = {
                 "has_tvshow": True, 
                 "tmdbid": data.get("tmdbid"), 
                 "title": data.get("title"), 
