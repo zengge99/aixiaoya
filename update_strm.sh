@@ -115,6 +115,7 @@ while true; do
     echo "-------------------------------------------"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] 开始更新任务..."
 
+    git restore . >/dev/null 2>&1
     git pull >/dev/null 2>&1
     rm -f "$STRM_FILE" >/dev/null 2>&1
 
