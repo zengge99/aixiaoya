@@ -27,7 +27,7 @@ trap cleanup SIGINT SIGTERM
 upload_github()
 {
   # --- 配置区 ---
-  TOKEN=""
+  TOKEN="$(cat git_token)"
   USER="zengge99"
   REPO="aixiaoya"
   FILE="$1"         # 想要上传的文件名
