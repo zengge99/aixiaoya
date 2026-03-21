@@ -119,10 +119,9 @@ while true; do
     rm -f "$STRM_FILE" >/dev/null 2>&1
 
     # 运行 Python 爬虫 (后台运行并等待，方便捕捉中断)
-    #python3 "$(dirname "$0")/strm_crawler.py" &
-    #PYTHON_PID=$!
-    #wait $PYTHON_PID
-    echo
+    python3 "$(dirname "$0")/strm_crawler.py" &
+    PYTHON_PID=$!
+    wait $PYTHON_PID
     
     # 检查 python 退出状态
     if [ $? -eq 0 ]; then
