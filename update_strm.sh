@@ -8,7 +8,7 @@ SIGN="?sign=SIGN_STR"
 SLEEP_TIME=21600 # 6小时
 PID_FILE="/tmp/strm_updater.pid"
 # ==========================================
-
+ 
 # --- 核心函数：清理并退出 ---
 cleanup() {
     echo -e "\n[!] 收到中断信号，正在深度清理子进程..."
