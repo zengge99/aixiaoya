@@ -134,7 +134,7 @@ while true; do
             
             # 2. 过滤：保留那些“不在 STRM_FILE 中”的行
             # -F: 固定字符串, -v: 反向匹配, -x: 整行匹配, -f: 从文件读取匹配模板
-            grep -Fvxf "$STRM_FILE" .tmp_local_content > .tmp_filtered_content || true
+            grep -aFvxf "$STRM_FILE" .tmp_local_content > .tmp_filtered_content || true
             
             # 3. 比较行数，判断是否有重复项被删除
             # 因为local_strm_list.zip可能是全量文件生成的，需要把爬虫服务器上有的删除
