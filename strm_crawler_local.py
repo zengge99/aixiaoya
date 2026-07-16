@@ -91,7 +91,7 @@ def find_tv_root_context(strm_path):
         nfo_path = os.path.join(current_dir, "tvshow.nfo")
         data = parse_nfo_data(nfo_path)
         
-        if data:
+        if data and data.get("tmdbid"):
             info = {
                 "has_tvshow": True, 
                 "tmdbid": data.get("tmdbid"), 
