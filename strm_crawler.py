@@ -105,7 +105,7 @@ def find_tv_root_context(strm_url):
         nfo_url = urljoin(search_url, "tvshow.nfo")
         data = parse_nfo_data(nfo_url)
         
-        if data and data.get("tmdbid"):
+        if data:
             info = {
                 "has_tvshow": True, 
                 "tmdbid": data.get("tmdbid"), 
